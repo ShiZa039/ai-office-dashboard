@@ -6,34 +6,89 @@ import { EventWatcher } from './eventWatcher';
 import { AgentStateStore } from './agentState';
 import { OfficeDashboardProvider } from './webview/provider';
 import { UsageWatcher } from './usageWatcher';
+import { SubscriptionUsageWatcher } from './subscriptionUsage';
+import { discoverProjectAgents } from './agentRoster';
+import { ensureHooksOnActivation, installHooks } from './hookInstaller';
 import { getRoomForAgent } from './types';
+
+/**
+ * Read a project-local agent→room map from `<folder>/.claude/office-rooms.json`
+ * for each workspace folder. This lets a project carry its own mapping (highest
+ * precedence) instead of relying on VSCode `claudeOffice.agentRooms` settings.
+ */
+function readProjectRoomMap(): Record<string, string> {
+  const merged: Record<string, string> = {};
+  for (const folder of vscode.workspace.workspaceFolders ?? []) {
+    const file = path.join(folder.uri.fsPath, '.claude', 'office-rooms.json');
+    try {
+      if (!fs.existsSync(file)) continue;
+      const parsed = JSON.parse(fs.readFileSync(file, 'utf-8'));
+      if (parsed && typeof parsed === 'object') {
+        for (const [name, room] of Object.entries(parsed)) {
+          if (typeof room === 'string') merged[name] = room;
+        }
+      }
+    } catch (err) {
+      log.appendLine(`Claude Office: failed to read ${file}: ${String(err)}`);
+    }
+  }
+  return merged;
+}
 
 function buildRoomResolver(): (name: string) => string {
   const customMap = vscode.workspace
     .getConfiguration('claudeOffice')
     .get<Record<string, string>>('agentRooms', {});
-  return (name) => getRoomForAgent(name, customMap);
+  // Project file wins over VSCode settings, which win over built-in defaults.
+  const map = { ...customMap, ...readProjectRoomMap() };
+  return (name) => getRoomForAgent(name, map);
 }
 
-function currentCwdFilter(): string | null {
+function currentCwdFilter(): string[] | null {
   const scope = vscode.workspace
     .getConfiguration('claudeOffice')
     .get<string>('scope', 'workspace');
   if (scope === 'global') return null;
-  const folder = vscode.workspace.workspaceFolders?.[0];
-  return folder ? folder.uri.fsPath : null;
+  const folders = vscode.workspace.workspaceFolders;
+  if (!folders || folders.length === 0) return null;
+  return folders.map((f) => f.uri.fsPath);
+}
+
+function seedRoster(store: AgentStateStore): void {
+  const enabled = vscode.workspace
+    .getConfiguration('claudeOffice')
+    .get<boolean>('roster.enabled', true);
+  if (!enabled) return;
+  const folders = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
+  if (folders.length === 0) return;
+  const names = discoverProjectAgents(folders);
+  if (names.length > 0) {
+    log.appendLine(`Claude Office: roster — ${names.length} agents from .claude/agents`);
+    store.seedAgents(names);
+  }
+}
+
+function usagePollSeconds(): number {
+  const v = vscode.workspace
+    .getConfiguration('claudeOffice')
+    .get<number>('usage.pollSeconds', 90);
+  return Math.max(30, v);
 }
 
 let watcher: EventWatcher | null = null;
 let store: AgentStateStore | null = null;
-let usageWatcher: UsageWatcher | null = null;
+let costWatcher: UsageWatcher | null = null;
+let subscriptionWatcher: SubscriptionUsageWatcher | null = null;
 const log = vscode.window.createOutputChannel('Claude Office');
 
 export function activate(context: vscode.ExtensionContext) {
   store = new AgentStateStore();
   store.setRoomResolver(buildRoomResolver());
   store.setCwdFilter(currentCwdFilter());
-  log.appendLine(`Claude Office: cwd filter = ${currentCwdFilter() ?? '(global, no filter)'}`);
+  const filterDesc = currentCwdFilter();
+  log.appendLine(
+    `Claude Office: cwd filter = ${filterDesc ? filterDesc.join(', ') : '(global, no filter)'}`,
+  );
   const provider = new OfficeDashboardProvider(context.extensionUri);
 
   const configPath = vscode.workspace
@@ -45,11 +100,12 @@ export function activate(context: vscode.ExtensionContext) {
 
   const broadcastState = () => {
     if (!store) return;
-    provider.updateAgents(store.getSnapshot());
+    provider.updateAgents(store.getSnapshot(), store.getModel());
   };
 
   store.onChange = broadcastState;
   store.start();
+  seedRoster(store);
 
   watcher = new EventWatcher(eventsFile, (events) => {
     if (!store) return;
@@ -61,6 +117,10 @@ export function activate(context: vscode.ExtensionContext) {
   watcher.start();
 
   provider.onReady = broadcastState;
+
+  // Zero-config: offer to install Claude Code hooks if they are missing.
+  const bundledHooksDir = path.join(context.extensionUri.fsPath, 'hooks');
+  void ensureHooksOnActivation(context, log, bundledHooksDir);
 
   const viewRegistration = vscode.window.registerWebviewViewProvider(
     OfficeDashboardProvider.viewId,
@@ -76,6 +136,17 @@ export function activate(context: vscode.ExtensionContext) {
     provider.openInEditor();
   });
 
+  const installHooksCmd = vscode.commands.registerCommand('claudeOffice.installHooks', () => {
+    const result = installHooks(log, bundledHooksDir, { replace: true });
+    if (result !== 'failed') {
+      void vscode.window.showInformationMessage(
+        result === 'installed'
+          ? 'Claude Office: hooks installed. New Claude Code sessions will now appear on the dashboard.'
+          : 'Claude Office: hooks were already installed — scripts refreshed.',
+      );
+    }
+  });
+
   const clearCmd = vscode.commands.registerCommand('claudeOffice.clearEvents', () => {
     if (!store) return;
     store.clear();
@@ -84,21 +155,39 @@ export function activate(context: vscode.ExtensionContext) {
     } catch {
       // ignore
     }
+    seedRoster(store);
     broadcastState();
     vscode.window.showInformationMessage('Agent events cleared');
   });
 
-  const usageEnabled = vscode.workspace
-    .getConfiguration('claudeOffice')
-    .get<boolean>('usage.enabled', true);
+  const startSubscriptionWatcher = () => {
+    subscriptionWatcher = new SubscriptionUsageWatcher({
+      intervalMs: usagePollSeconds() * 1000,
+      onUpdate: (snapshot) => provider.updateSubscription(snapshot),
+      onError: (message) => provider.reportUsageError('subscription', message),
+      log: (message) => log.appendLine(message),
+    });
+    subscriptionWatcher.start();
+  };
 
-  if (usageEnabled) {
-    usageWatcher = new UsageWatcher(
+  const startCostWatcher = () => {
+    costWatcher = new UsageWatcher(
       log,
-      (snapshot) => provider.updateUsage(snapshot),
-      (message) => provider.reportUsageError(message),
+      (snapshot) => provider.updateCost(snapshot),
+      (message) => provider.reportUsageError('cost', message),
     );
-    usageWatcher.start();
+    costWatcher.start();
+  };
+
+  const costSource = () =>
+    vscode.workspace.getConfiguration('claudeOffice').get<string>('usage.costSource', 'off');
+
+  const usageEnabled = () =>
+    vscode.workspace.getConfiguration('claudeOffice').get<boolean>('usage.enabled', true);
+
+  if (usageEnabled()) {
+    startSubscriptionWatcher();
+    if (costSource() === 'ccusage') startCostWatcher();
   }
 
   const cfgChange = vscode.workspace.onDidChangeConfiguration((e) => {
@@ -108,28 +197,40 @@ export function activate(context: vscode.ExtensionContext) {
     if (e.affectsConfiguration('claudeOffice.scope') && store) {
       store.setCwdFilter(currentCwdFilter());
       store.clear();
-      provider.updateAgents(store.getSnapshot());
+      seedRoster(store);
+      provider.updateAgents(store.getSnapshot(), store.getModel());
+    }
+    if (e.affectsConfiguration('claudeOffice.roster') && store) {
+      store.clear();
+      seedRoster(store);
+      provider.updateAgents(store.getSnapshot(), store.getModel());
     }
     if (!e.affectsConfiguration('claudeOffice.usage')) return;
-    const enabled = vscode.workspace
-      .getConfiguration('claudeOffice')
-      .get<boolean>('usage.enabled', true);
-    if (enabled && !usageWatcher) {
-      usageWatcher = new UsageWatcher(
-        log,
-        (snapshot) => provider.updateUsage(snapshot),
-        (message) => provider.reportUsageError(message),
-      );
-      usageWatcher.start();
-    } else if (!enabled && usageWatcher) {
-      usageWatcher.stop();
-      usageWatcher = null;
-    } else if (enabled && usageWatcher) {
-      usageWatcher.restart();
+
+    // Restart usage watchers with fresh config.
+    subscriptionWatcher?.stop();
+    subscriptionWatcher = null;
+    costWatcher?.stop();
+    costWatcher = null;
+    if (usageEnabled()) {
+      startSubscriptionWatcher();
+      if (costSource() === 'ccusage') startCostWatcher();
+      else provider.resetCost();
     }
   });
 
-  context.subscriptions.push(viewRegistration, showCmd, openInEditorCmd, clearCmd, cfgChange);
+  const foldersChange = vscode.workspace.onDidChangeWorkspaceFolders(() => {
+    if (!store) return;
+    store.setRoomResolver(buildRoomResolver());
+    store.setCwdFilter(currentCwdFilter());
+    store.clear();
+    seedRoster(store);
+    provider.updateAgents(store.getSnapshot(), store.getModel());
+  });
+
+  context.subscriptions.push(
+    viewRegistration, showCmd, openInEditorCmd, installHooksCmd, clearCmd, cfgChange, foldersChange,
+  );
 }
 
 export function deactivate() {
@@ -141,8 +242,12 @@ export function deactivate() {
     store.stop();
     store = null;
   }
-  if (usageWatcher) {
-    usageWatcher.stop();
-    usageWatcher = null;
+  if (costWatcher) {
+    costWatcher.stop();
+    costWatcher = null;
+  }
+  if (subscriptionWatcher) {
+    subscriptionWatcher.stop();
+    subscriptionWatcher = null;
   }
 }

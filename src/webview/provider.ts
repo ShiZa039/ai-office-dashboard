@@ -16,8 +16,13 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
   private panelSlot: WebviewSlot | null = null;
   private panel: vscode.WebviewPanel | null = null;
   private lastState: Record<string, AgentState> | null = null;
-  private lastUsage: unknown = null;
-  private lastUsageError: string | null = null;
+  private lastModel: string | null = null;
+  private lastSubscription: unknown = null;
+  private lastCost: unknown = null;
+  private usageErrors: { subscription: string | null; cost: string | null } = {
+    subscription: null,
+    cost: null,
+  };
 
   constructor(private extensionUri: vscode.Uri) {}
 
@@ -71,20 +76,41 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  updateAgents(agents: Record<string, AgentState>): void {
+  updateAgents(agents: Record<string, AgentState>, model: string | null = null): void {
     this.lastState = agents;
-    this.broadcast({ type: 'full_state', agents });
+    this.lastModel = model;
+    this.broadcast({ type: 'full_state', agents, model });
   }
 
-  updateUsage(data: unknown): void {
-    this.lastUsage = data;
-    this.lastUsageError = null;
-    this.broadcast({ type: 'usage_update', data });
+  updateSubscription(data: unknown): void {
+    this.lastSubscription = data;
+    this.usageErrors.subscription = null;
+    this.pushUsage();
   }
 
-  reportUsageError(message: string): void {
-    this.lastUsageError = message;
-    this.broadcast({ type: 'usage_error', message });
+  updateCost(data: unknown): void {
+    this.lastCost = data;
+    this.usageErrors.cost = null;
+    this.pushUsage();
+  }
+
+  reportUsageError(source: 'subscription' | 'cost', message: string): void {
+    this.usageErrors[source] = message;
+    this.broadcast({ type: 'usage_error', source, message });
+  }
+
+  /** Clear cached cost data (e.g. when the cost source is switched off). */
+  resetCost(): void {
+    this.lastCost = null;
+    this.usageErrors.cost = null;
+    this.pushUsage();
+  }
+
+  private pushUsage(): void {
+    this.broadcast({
+      type: 'usage_update',
+      data: { subscription: this.lastSubscription, cost: this.lastCost },
+    });
   }
 
   isVisible(): boolean {
@@ -102,12 +128,19 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
       if (msg.type !== 'webview_ready') return;
       slot.ready = true;
       if (this.lastState) {
-        webview.postMessage({ type: 'full_state', agents: this.lastState });
+        webview.postMessage({ type: 'full_state', agents: this.lastState, model: this.lastModel });
       }
-      if (this.lastUsage !== null) {
-        webview.postMessage({ type: 'usage_update', data: this.lastUsage });
-      } else if (this.lastUsageError) {
-        webview.postMessage({ type: 'usage_error', message: this.lastUsageError });
+      if (this.lastSubscription !== null || this.lastCost !== null) {
+        webview.postMessage({
+          type: 'usage_update',
+          data: { subscription: this.lastSubscription, cost: this.lastCost },
+        });
+      }
+      for (const source of ['subscription', 'cost'] as const) {
+        const message = this.usageErrors[source];
+        if (message) {
+          webview.postMessage({ type: 'usage_error', source, message });
+        }
       }
       this.onReady?.();
     });

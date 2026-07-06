@@ -2,201 +2,152 @@
 
 Расширение визуализирует работу субагентов Claude Code как «офис с комнатами». Состоит из двух частей:
 
-1. **Хуки** Claude Code (Python-скрипт + `~/.claude/settings.json`) — пишут события в `~/.claude/agent-events.jsonl`.
+1. **Хуки** Claude Code — пишут события в `~/.claude/agent-events.jsonl`. **С v0.9.0 ставятся автоматически** из расширения.
 2. **VSCode-расширение** — читает JSONL и рисует дашборд.
 
 ---
 
-## Часть 1. Установка на новой машине
+## Быстрая установка (рекомендуется)
 
 ### Требования
 
 - VSCode ≥ 1.85
 - Claude Code CLI (любая версия с поддержкой `SubagentStart`/`SubagentStop`/`Stop` хуков)
-- Python 3 в `PATH` (на Windows — обычно идёт с Python.org installer; на Linux/macOS — `python3`)
-- (опционально) Node.js + npx — для панели Plan usage через `ccusage`
+- Python 3 **или** Node.js в `PATH` (для хук-скрипта — расширение само найдёт, что есть)
 
-### Шаг 1. Хук-скрипт на user-level
+### Шаги
 
-Файл-эмиттер событий должен лежать в `~/.claude/hooks/emit-agent-event.py`.
+1. Установи расширение:
 
-**Windows (PowerShell):**
+   ```powershell
+   # Windows
+   & 'C:\Users\<user>\AppData\Local\Programs\Microsoft VS Code\bin\code.cmd' `
+     --install-extension 'D:\path\to\claude-office-dashboard-0.9.0.vsix' --force
+   ```
 
-```powershell
-$dst = "$env:USERPROFILE\.claude\hooks"
-New-Item -ItemType Directory -Force -Path $dst | Out-Null
-Copy-Item "D:\path\to\claude-office-dashboard\hooks\emit-agent-event.py" "$dst\"
-```
+   ```bash
+   # Linux/macOS
+   code --install-extension /path/to/claude-office-dashboard-0.9.0.vsix --force
+   ```
 
-**Linux/macOS (bash):**
+2. `Ctrl+Shift+P` → **Developer: Reload Window**.
+3. Появится уведомление *«Claude Code hooks are not set up… Install them automatically?»* → нажми **Install**.
 
-```bash
-mkdir -p ~/.claude/hooks
-cp /path/to/claude-office-dashboard/hooks/emit-agent-event.py ~/.claude/hooks/
-```
+   Что при этом происходит:
+   - `emit-agent-event.py` и `emit-agent-event.js` копируются в `~/.claude/hooks/`;
+   - в `~/.claude/settings.json` добавляются три хука (`SubagentStart`, `SubagentStop`, `Stop`). Существующее содержимое файла и чужие хуки не трогаются; перед записью создаётся бэкап `settings.json.claude-office.bak`;
+   - при обновлении расширения хук-скрипты обновляются автоматически.
 
-Если на Linux команда `python` указывает на Python 2 — поправь `~/.claude/settings.json` ниже, заменив `python` на `python3`.
+4. Готово. Запусти Claude Code сессию в проекте и спавни любой субагент — фигурка появится в дашборде.
 
-### Шаг 2. Регистрация хуков в `~/.claude/settings.json`
+Если уведомление было закрыто — `Ctrl+Shift+P` → **Claude Office: Install Claude Code Hooks**.
 
-Открой (или создай) `~/.claude/settings.json` и добавь блок `hooks`. Если файл уже есть — мерджи аккуратно, не затирая остальные настройки.
+### Панель Plan usage (лимиты подписки)
 
-```json
-{
-  "hooks": {
-    "SubagentStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$HOME/.claude/hooks/emit-agent-event.py\" agent_start",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
-    "SubagentStop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$HOME/.claude/hooks/emit-agent-event.py\" agent_stop",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$HOME/.claude/hooks/emit-agent-event.py\" session_stop",
-            "timeout": 5
-          }
-        ]
-      }
-    ]
-  }
-}
-```
+Работает из коробки, если ты залогинен в Claude Code по подписке Pro/Max: расширение читает OAuth-токен из `~/.claude/.credentials.json` (macOS — Keychain) и опрашивает тот же эндпоинт, что и команда `/usage` в Claude Code. Показывает:
 
-`$HOME` Claude Code раскрывает сам — работает и в Windows, и в Unix-shell.
+- **Session (5h)** — процент 5-часового окна + когда сбросится;
+- **Week (all)** — недельный лимит по всем моделям;
+- **Week (Opus)** — недельный лимит Opus (только Max-планы);
+- бейдж плана (Pro / Max).
 
-### Шаг 3. Проверка хука
+Токен используется только для запроса к `api.anthropic.com` и никуда больше не передаётся.
 
-Запусти любую сессию Claude Code и спавни короткий субагент. После этого:
-
-```powershell
-# Windows
-Get-Content "$env:USERPROFILE\.claude\agent-events.jsonl" -Tail 5
-```
-
-```bash
-# Linux/macOS
-tail -5 ~/.claude/agent-events.jsonl
-```
-
-Должны быть строки вида:
-
-```json
-{"ts":"2026-04-17T14:23:11.000Z","event":"agent_start","session":"...","cwd":"/path/to/project","agent":"backend-lead","task":"backend-lead"}
-{"ts":"2026-04-17T14:23:14.000Z","event":"agent_stop","session":"...","cwd":"/path/to/project","agent":"backend-lead","task":"...","result":"success"}
-```
-
-Если строк нет — смотри `~/.claude/hook-debug.json` (Claude Code пишет туда последние ошибки хуков).
-
-### Шаг 4. Установка VSCode-расширения
-
-Возьми последний `.vsix` из `D:\Code projects\claude-office-dashboard\` (на момент написания — `claude-office-dashboard-0.7.0.vsix`).
-
-**Windows (PowerShell):**
-
-```powershell
-& 'C:\Users\<user>\AppData\Local\Programs\Microsoft VS Code\bin\code.cmd' `
-  --install-extension 'D:\path\to\claude-office-dashboard-0.7.0.vsix' `
-  --force
-```
-
-**Linux/macOS:**
-
-```bash
-code --install-extension /path/to/claude-office-dashboard-0.7.0.vsix --force
-```
-
-Затем `Ctrl+Shift+P` → **Developer: Reload Window**.
-
-### Шаг 5. Проверка
-
-В Activity Bar (левая полоса VSCode) появится иконка домика — это панель **Claude Office**. Клик по ней откроет дашборд. На пустой машине будет «Лобби пустует» — это норма, события появятся когда Claude Code запустит первый субагент.
-
-`View → Output → Claude Office` — лог расширения, в нём при старте видна строка `cwd filter = <путь к workspace>`.
-
----
-
-## Часть 2. Настройка под новый проект
-
-В большинстве случаев **ничего настраивать не нужно** — просто открой проект в VSCode, и дашборд сам отфильтрует события по `cwd` текущего workspace (`claudeOffice.scope = workspace` по умолчанию).
-
-Кастомизация нужна, только если:
-- В проекте свои субагенты с именами, которых нет в дефолтном маппинге.
-- Хочется видеть ВСЕ окна VSCode в одной панели (отключить per-window isolation).
-
-### Свои агенты → свои комнаты
-
-Известные комнаты: `directors`, `backend`, `frontend`, `qa`, `security`, `devops`, `integrations`, `ai-lab`, `lobby`.
-
-Открой `Ctrl+,` (Settings) → **Workspace** tab → ищи `claudeOffice.agentRooms` → **Edit in settings.json**:
+Если работаешь по API-ключу (без подписки) — лимитов нет; можно включить $-оценки расхода:
 
 ```json
 {
-  "claudeOffice.agentRooms": {
-    "my-custom-billing-agent": "backend",
-    "ux-research-agent": "frontend",
-    "compliance-checker": "security"
-  }
-}
-```
-
-Маппинг мерджится поверх дефолта. Изменения подхватываются на лету (без Reload).
-
-Если агент не указан явно и его имя не подходит под эвристику суффиксов (`*-lead`, `*-specialist`, `*-director`, токены `react/django/docker/qa/security/...`) — он попадёт в **Лобби**.
-
-### Отключить per-window изоляцию
-
-Если хочешь видеть события из всех окон VSCode сразу (старое поведение до v0.7.0):
-
-```json
-{
-  "claudeOffice.scope": "global"
-}
-```
-
-Это можно поставить либо глобально (User Settings), либо точечно для одного workspace.
-
-### Настройка лимитов Plan usage
-
-```json
-{
-  "claudeOffice.usage.enabled": true,
-  "claudeOffice.usage.pollSeconds": 90,
+  "claudeOffice.usage.costSource": "ccusage",
   "claudeOffice.usage.limitBlockUsd": 50,
   "claudeOffice.usage.limitWeeklyUsd": 200,
   "claudeOffice.usage.limitWeeklyOpusUsd": 100
 }
 ```
 
-`0` для лимита = не показывать прогресс-бар, только цифру в долларах. Для работы панели нужен `npx` в PATH (используется `ccusage@latest`).
+(нужен `npx` в PATH; используется `ccusage@latest`).
 
 ---
 
-## Часть 3. Тест после установки
+## Настройка под проект
 
-1. Открой проект в VSCode → Activity Bar → **Claude Office**.
-2. В Output-панели проверь строку `cwd filter = <твой проект>`.
-3. Запусти Claude Code в этом проекте, попроси спавнить любой субагент.
-4. В дашборде должна появиться фигурка в соответствующей комнате (working → done через 5 сек → idle).
-5. Если события не приходят — `Ctrl+Shift+P` → **Claude Office: Clear Events** (сбросит старый кэш) и повтори.
+В большинстве случаев **ничего настраивать не нужно**:
+
+- дашборд фильтрует события по `cwd` текущего workspace (`claudeOffice.scope = workspace` по умолчанию);
+- агенты проекта из `.claude/agents/**/*.md` показываются сразу как idle-фигурки (`claudeOffice.roster.enabled`);
+- комната выбирается keyword-эвристикой по имени агента (`react-*` → frontend, `*-director` → directors, `mqtt/esp32` → iot и т.д.).
+
+Кастомизация нужна, только если эвристика промахивается.
+
+### Свои агенты → свои комнаты
+
+Известные комнаты: `directors`, `backend`, `frontend`, `qa`, `security`, `devops`, `integrations`, `ai-lab`, `iot`, `lobby`.
+
+Вариант 1 — файл в проекте `.claude/office-rooms.json` (коммитится с репо, высший приоритет):
+
+```json
+{
+  "my-custom-billing-agent": "backend",
+  "release-lead": "devops"
+}
+```
+
+Вариант 2 — VSCode settings (`Ctrl+,` → Workspace → `claudeOffice.agentRooms`):
+
+```json
+{
+  "claudeOffice.agentRooms": {
+    "ux-research-agent": "frontend",
+    "compliance-checker": "security"
+  }
+}
+```
+
+Приоритет: **`.claude/office-rooms.json` > `claudeOffice.agentRooms` > встроенные агенты Claude Code > эвристика > лобби**. Изменения подхватываются на лету.
+
+### Отключить per-window изоляцию
+
+Чтобы видеть события всех окон VSCode сразу:
+
+```json
+{ "claudeOffice.scope": "global" }
+```
+
+---
+
+## Ручная установка хуков (fallback)
+
+Нужна только если автоустановка не подходит (например, `settings.json` генерируется другим инструментом).
+
+1. Скопируй `hooks/emit-agent-event.py` (или `.js`) из репозитория в `~/.claude/hooks/`.
+2. Добавь в `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "SubagentStart": [
+      { "hooks": [ { "type": "command", "command": "python \"$HOME/.claude/hooks/emit-agent-event.py\" agent_start", "timeout": 5 } ] }
+    ],
+    "SubagentStop": [
+      { "hooks": [ { "type": "command", "command": "python \"$HOME/.claude/hooks/emit-agent-event.py\" agent_stop", "timeout": 5 } ] }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "python \"$HOME/.claude/hooks/emit-agent-event.py\" session_stop", "timeout": 5 } ] }
+    ]
+  }
+}
+```
+
+Для Node-варианта замени `python "...emit-agent-event.py"` на `node "...emit-agent-event.js"`. `$HOME` Claude Code раскрывает сам на всех платформах.
+
+3. Проверка: спавни субагент и посмотри хвост файла событий:
+
+```powershell
+Get-Content "$env:USERPROFILE\.claude\agent-events.jsonl" -Tail 5   # Windows
+```
+
+```bash
+tail -5 ~/.claude/agent-events.jsonl                                 # Linux/macOS
+```
 
 ---
 
@@ -204,22 +155,23 @@ code --install-extension /path/to/claude-office-dashboard-0.7.0.vsix --force
 
 | Симптом | Причина | Что делать |
 |---|---|---|
-| Дашборд пустой, в Output `cwd filter = ...` есть | Хуки не пишут события | Проверь `~/.claude/agent-events.jsonl` — растёт ли файл |
-| `agent-events.jsonl` пустой | Хуки не зарегистрированы | Перепроверь `~/.claude/settings.json`, рестарт Claude Code |
-| Кириллица в `task` ломается (`Р¤Р°Р№Р»`) | Старый `emit-agent-event.py` без UTF-8 fix | Скопируй свежий скрипт из `hooks/emit-agent-event.py` (с `sys.stdin.buffer.read().decode("utf-8")`) |
-| События приходят, но не отображаются | Cwd-фильтр режет всё | В Output смотри строку `cwd filter`. Если путь не совпадает с workspace — поставь `claudeOffice.scope = global` для проверки |
-| Агент всегда в Лобби | Имя не в маппинге и не подходит под эвристику | Добавь в `claudeOffice.agentRooms` явно |
-| Plan usage показывает `--` | `npx ccusage` не отвечает за 30 сек | Запусти вручную `npx --yes ccusage@latest blocks --active --json` — увидишь реальную ошибку |
+| Дашборд пустой, есть только idle-фигурки | Хуки не установлены/не пишут | `Ctrl+Shift+P` → **Claude Office: Install Claude Code Hooks**; проверь, растёт ли `~/.claude/agent-events.jsonl` |
+| `agent-events.jsonl` пустой | Хуки не зарегистрированы | Проверь `~/.claude/settings.json` (секция `hooks`), перезапусти Claude Code |
+| Уведомление об установке не появляется | Ранее нажато «Don't ask again» | Команда **Install Claude Code Hooks** ставит вручную |
+| События приходят, но не отображаются | Cwd-фильтр режет всё | В Output (`View → Output → Claude Office`) строка `cwd filter`; для проверки поставь `claudeOffice.scope = global` |
+| Агент всегда в Лобби | Имя не подходит под эвристику | Добавь в `.claude/office-rooms.json` или `claudeOffice.agentRooms` |
+| Plan usage: `no Claude Code login found` | Нет `~/.claude/.credentials.json` | Залогинься в Claude Code (`claude` → login по подписке) |
+| Plan usage: `token expired` | Токен протух | Запусти любую сессию Claude Code — токен обновится сам |
+| Plan usage: `HTTP 429` | Рейт-лимит эндпоинта | Само пройдёт; можно увеличить `usage.pollSeconds` |
+| Кириллица в `task` ломается | Старый `emit-agent-event.py` | Хук-скрипты обновляются автоматически при `hooks.autoSetup = true`; иначе переустанови хуки командой |
 
 ---
 
 ## Обновление расширения
 
 ```powershell
-# Windows
 & 'C:\Users\<user>\AppData\Local\Programs\Microsoft VS Code\bin\code.cmd' `
-  --install-extension 'D:\path\to\claude-office-dashboard-X.Y.Z.vsix' `
-  --force
+  --install-extension 'D:\path\to\claude-office-dashboard-X.Y.Z.vsix' --force
 ```
 
-Затем **Developer: Reload Window**. Хуки обновлять отдельно — только если меняется сам `emit-agent-event.py` (например, новый формат событий).
+Затем **Developer: Reload Window**. Хук-скрипты обновятся сами при следующей активации (если `claudeOffice.hooks.autoSetup = true`).

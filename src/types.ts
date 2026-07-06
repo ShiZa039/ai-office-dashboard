@@ -1,13 +1,15 @@
 /** Raw event from JSONL file */
 export interface AgentEvent {
   ts: string;
-  event: 'agent_start' | 'agent_stop' | 'session_stop';
+  event: 'session_start' | 'agent_start' | 'agent_stop' | 'session_stop';
   agent: string;
   task?: string;
   result?: string;
   session?: string;
   /** Working directory Claude Code was invoked from; used for per-window isolation. */
   cwd?: string;
+  /** Model ID of the session (e.g. "claude-fable-5"); best-effort, may be absent. */
+  model?: string;
 }
 
 /** Computed agent state for display */
@@ -22,9 +24,14 @@ export interface AgentState {
 
 /** Message sent from extension to webview */
 export type WebviewMessage =
-  | { type: 'agent_update' | 'full_state'; agents: Record<string, AgentState> }
-  | { type: 'usage_update'; data: unknown }
-  | { type: 'usage_error'; message: string };
+  | {
+      type: 'agent_update' | 'full_state';
+      agents: Record<string, AgentState>;
+      /** Session model ID; null until any event carries one. */
+      model?: string | null;
+    }
+  | { type: 'usage_update'; data: { subscription: unknown; cost: unknown } }
+  | { type: 'usage_error'; source: 'subscription' | 'cost'; message: string };
 
 /** Known room ids — keep in sync with media/icons.js and office.html data-room attrs. */
 export const KNOWN_ROOMS = [
@@ -36,67 +43,25 @@ export const KNOWN_ROOMS = [
   'devops',
   'integrations',
   'ai-lab',
+  'iot',
   'lobby',
 ] as const;
 
-/** Default mapping for agents shipped with the BAZA.CRM profile. */
+/**
+ * Built-in Claude Code agent types. Project-specific agents are resolved by
+ * the keyword heuristic below, or explicitly via `.claude/office-rooms.json`
+ * in the project / the `claudeOffice.agentRooms` setting.
+ */
 export const DEFAULT_AGENT_ROOMS: Record<string, string> = {
-  'technical-director': 'directors',
-  'product-director': 'directors',
-  'delivery-director': 'directors',
-
-  'backend-lead': 'backend',
-  'database-lead': 'backend',
-  'celery-tasks-specialist': 'backend',
-  'service-layer-specialist': 'backend',
-  'orm-optimizer': 'backend',
-  'migrations-specialist': 'backend',
-  'drf-serializer-specialist': 'backend',
-  'signals-specialist': 'backend',
-  'api-designer': 'backend',
-
-  'frontend-lead': 'frontend',
-  'react-components-specialist': 'frontend',
-  'react-state-specialist': 'frontend',
-  'ux-designer': 'frontend',
-  'accessibility-specialist': 'frontend',
-
-  'qa-lead': 'qa',
-  'pytest-specialist': 'qa',
-  'integration-test-specialist': 'qa',
-  'test-coverage-analyst': 'qa',
-  'edge-case-hunter': 'qa',
-
-  'security-lead': 'security',
-  'auth-hardening-specialist': 'security',
-  'secrets-scanner': 'security',
-  'security-auditor': 'security',
-  'permissions-specialist': 'security',
-  'data-protection-specialist': 'security',
-
-  'devops-lead': 'devops',
-  'docker-compose-specialist': 'devops',
-  'nginx-specialist': 'devops',
-  'ci-cd-pipeline-specialist': 'devops',
-  'backup-recovery-specialist': 'devops',
-
-  'integrations-lead': 'integrations',
-  '1c-integration-specialist': 'integrations',
-  'telegram-bot-specialist': 'integrations',
-  'payment-gateway-specialist': 'integrations',
-  'email-integration-specialist': 'integrations',
-
-  'ai-lead': 'ai-lab',
-  'llm-integration-specialist': 'ai-lab',
-  'ai-prompt-engineering-specialist': 'ai-lab',
-  'ai-safety-specialist': 'ai-lab',
-
-  'crm-module-specialist': 'backend',
-  'orders-module-specialist': 'backend',
-  'warehouse-module-specialist': 'backend',
-  'mes-module-specialist': 'backend',
-  'finance-module-specialist': 'backend',
-  'payroll-module-specialist': 'backend',
+  'general-purpose': 'lobby',
+  claude: 'lobby',
+  Explore: 'lobby',
+  Task: 'lobby',
+  Plan: 'directors',
+  'code-reviewer': 'qa',
+  'claude-code-guide': 'ai-lab',
+  'statusline-setup': 'devops',
+  'output-style-setup': 'frontend',
 };
 
 /** Keyword-based fallback for unknown agent names (ordered: most specific first). */
@@ -104,20 +69,42 @@ const KEYWORD_RULES: Array<{ keywords: string[]; room: string }> = [
   { room: 'directors', keywords: ['director'] },
   { room: 'ai-lab', keywords: ['ai', 'llm', 'prompt', 'claude', 'anthropic'] },
   {
+    // IoT is its own domain (firmware, telemetry, MQTT, provisioning). Listed
+    // before backend/devops/integrations so its specific tokens win.
+    room: 'iot',
+    keywords: [
+      'iot', 'mqtt', 'esp32', 'esptool', 'firmware', 'ota', 'telemetry',
+      'sensor', 'device', 'provisioning', 'sticker', 'android',
+    ],
+  },
+  {
     room: 'security',
-    keywords: ['security', 'auth', 'secret', 'permission', 'threat', 'hardening', 'iac'],
+    keywords: [
+      'security', 'auth', 'secret', 'permission', 'threat', 'hardening',
+      'audit', 'auditor', 'compliance', 'dependency', 'tls', 'pki',
+    ],
   },
   {
     room: 'devops',
     keywords: [
       'devops', 'docker', 'nginx', 'ci', 'cd', 'backup', 'deploy', 'apm',
-      'observability', 'alerting', 'scalability', 'ratelimit',
+      'observability', 'alerting', 'scalability', 'ratelimit', 'iac',
+      'incident', 'release', 'mcp',
     ],
   },
-  { room: 'qa', keywords: ['qa', 'test', 'pytest', 'coverage', 'edge'] },
+  {
+    room: 'qa',
+    keywords: [
+      'qa', 'test', 'pytest', 'vitest', 'coverage', 'edge', 'reviewer',
+      'docs', 'annotations',
+    ],
+  },
   {
     room: 'frontend',
-    keywords: ['frontend', 'react', 'ui', 'ux', 'accessibility', 'a11y', 'i18n', 'media'],
+    keywords: [
+      'frontend', 'react', 'ui', 'ux', 'accessibility', 'a11y', 'i18n',
+      'media', 'geo', 'maps', 'camera', 'scanner',
+    ],
   },
   {
     room: 'integrations',
@@ -147,8 +134,8 @@ export function inferRoomByName(name: string): string {
 
 /**
  * Resolve an agent to its room. Precedence:
- * 1. `customMap` (user settings) — direct hit wins
- * 2. `DEFAULT_AGENT_ROOMS` — built-in mapping for BAZA.CRM profile
+ * 1. `customMap` (project `.claude/office-rooms.json` merged over user settings) — direct hit wins
+ * 2. `DEFAULT_AGENT_ROOMS` — built-in Claude Code agent types
  * 3. `inferRoomByName` — keyword heuristic
  * 4. `'lobby'` — fallback for anything unknown
  */

@@ -48,6 +48,20 @@ function mkEvent(overrides: Partial<AgentEvent>): AgentEvent {
   assert.ok(!snap['qa-lead'], 'non-matching sibling folder dropped');
 }
 
+// --- Multi-root filter: any of several folders matches (.code-workspace) ---
+
+{
+  const store = new AgentStateStore();
+  store.setCwdFilter(['/home/user/projectA', '/home/user/projectB']);
+  store.processEvent(mkEvent({ cwd: '/home/user/projectA' }));
+  store.processEvent(mkEvent({ agent: 'qa-lead', cwd: '/home/user/projectB' }));
+  store.processEvent(mkEvent({ agent: 'devops-lead', cwd: '/home/user/projectC' }));
+  const snap = store.getSnapshot();
+  assert.ok(snap['backend-lead'], 'multi-root: first folder matches');
+  assert.ok(snap['qa-lead'], 'multi-root: second folder matches');
+  assert.ok(!snap['devops-lead'], 'multi-root: unlisted folder dropped');
+}
+
 // --- Subfolder invocation counts as a match (startsWith) ---
 
 {
@@ -113,6 +127,46 @@ function mkEvent(overrides: Partial<AgentEvent>): AgentEvent {
     !store.getSnapshot()['backend-lead'],
     'events without cwd dropped under filter',
   );
+}
+
+// --- Model tracking: any event carrying model updates it, newest wins ---
+
+{
+  const store = new AgentStateStore();
+  assert.strictEqual(store.getModel(), null, 'model unknown initially');
+
+  store.processEvent(mkEvent({ event: 'session_start', agent: '', model: 'claude-fable-5' }));
+  assert.strictEqual(store.getModel(), 'claude-fable-5', 'session_start sets model');
+  assert.strictEqual(
+    Object.keys(store.getSnapshot()).length,
+    0,
+    'session_start does not create agents',
+  );
+
+  store.processEvent(mkEvent({ event: 'agent_stop', model: 'claude-sonnet-5' }));
+  assert.strictEqual(store.getModel(), 'claude-sonnet-5', 'later event overrides model');
+
+  store.processEvent(mkEvent({ event: 'agent_start', agent: 'qa-lead' }));
+  assert.strictEqual(store.getModel(), 'claude-sonnet-5', 'event without model keeps last known');
+
+  store.clear();
+  assert.strictEqual(store.getModel(), null, 'clear resets model');
+}
+
+// --- Model tracking respects the cwd filter ---
+
+{
+  const store = new AgentStateStore();
+  store.setCwdFilter('/home/user/projectA');
+  store.processEvent(
+    mkEvent({ event: 'session_start', agent: '', cwd: '/home/user/projectB', model: 'claude-opus-4-8' }),
+  );
+  assert.strictEqual(store.getModel(), null, 'model from other project ignored');
+
+  store.processEvent(
+    mkEvent({ event: 'session_start', agent: '', cwd: '/home/user/projectA', model: 'claude-opus-4-8' }),
+  );
+  assert.strictEqual(store.getModel(), 'claude-opus-4-8', 'model from our project applied');
 }
 
 console.log('All agentState tests passed.');

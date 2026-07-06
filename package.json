@@ -1,9 +1,13 @@
 {
   "name": "claude-office-dashboard",
   "displayName": "Claude Office Dashboard",
-  "description": "Real-time agent activity dashboard for Claude Code",
-  "version": "0.7.0",
+  "description": "Universal real-time agent dashboard for Claude Code: auto-setup hooks, per-project agent view, real subscription plan limits",
+  "version": "0.9.0",
   "publisher": "shiza039",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ShiZa039/claude-office-dashboard.git"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -43,6 +47,10 @@
       {
         "command": "claudeOffice.clearEvents",
         "title": "Claude Office: Clear Events"
+      },
+      {
+        "command": "claudeOffice.installHooks",
+        "title": "Claude Office: Install Claude Code Hooks"
       }
     ],
     "menus": {
@@ -62,10 +70,20 @@
           "default": "",
           "description": "Path to agent-events.jsonl file"
         },
+        "claudeOffice.hooks.autoSetup": {
+          "type": "boolean",
+          "default": true,
+          "description": "Offer to install Claude Code hooks automatically when they are missing, and keep hook scripts up to date"
+        },
+        "claudeOffice.roster.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Discover agents from the project's .claude/agents/ folder and show them as idle immediately"
+        },
         "claudeOffice.usage.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Show plan usage panel"
+          "description": "Show plan usage panel (real subscription limits via your Claude Code login)"
         },
         "claudeOffice.usage.pollSeconds": {
           "type": "number",
@@ -73,20 +91,26 @@
           "minimum": 30,
           "description": "Usage refresh seconds"
         },
+        "claudeOffice.usage.costSource": {
+          "type": "string",
+          "enum": ["off", "ccusage"],
+          "default": "off",
+          "description": "Additional cost-estimate bars (USD). \"ccusage\" spawns `npx ccusage` periodically"
+        },
         "claudeOffice.usage.limitBlockUsd": {
           "type": "number",
           "default": 0,
-          "description": "Block limit USD"
+          "description": "Block limit USD (only for the ccusage cost bars)"
         },
         "claudeOffice.usage.limitWeeklyUsd": {
           "type": "number",
           "default": 0,
-          "description": "Weekly limit USD"
+          "description": "Weekly limit USD (only for the ccusage cost bars)"
         },
         "claudeOffice.usage.limitWeeklyOpusUsd": {
           "type": "number",
           "default": 0,
-          "description": "Opus weekly limit USD"
+          "description": "Opus weekly limit USD (only for the ccusage cost bars)"
         },
         "claudeOffice.scope": {
           "type": "string",
@@ -98,7 +122,7 @@
           "type": "object",
           "default": {},
           "additionalProperties": { "type": "string" },
-          "markdownDescription": "Custom agent→room mapping. Merged **over** the built-in defaults. Example: `{\"my-custom-agent\": \"backend\", \"design-agent\": \"frontend\"}`.\n\nKnown rooms: `directors`, `backend`, `frontend`, `qa`, `security`, `devops`, `integrations`, `ai-lab`, `lobby`.\n\nUnknown agents are resolved by a keyword heuristic (e.g. `*-director` → directors, `react-*` → frontend); unmatched agents fall back to `lobby`."
+          "markdownDescription": "Custom agent→room mapping. Merged **over** the built-in defaults. Example: `{\"my-custom-agent\": \"backend\", \"design-agent\": \"frontend\"}`.\n\nKnown rooms: `directors`, `backend`, `frontend`, `qa`, `security`, `devops`, `integrations`, `ai-lab`, `iot`, `lobby`.\n\nUnknown agents are resolved by a keyword heuristic (e.g. `*-director` → directors, `react-*` → frontend); unmatched agents fall back to `lobby`."
         }
       }
     }
@@ -108,7 +132,7 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "lint": "eslint src --ext ts",
-    "test": "tsc -p ./ && node out/test/eventParser.test.js && node out/test/types.test.js && node out/test/agentState.test.js"
+    "test": "tsc -p ./ && node out/test/eventParser.test.js && node out/test/types.test.js && node out/test/agentState.test.js && node out/test/hookConfig.test.js && node out/test/subscriptionUsage.test.js && node out/test/agentRoster.test.js && node out/test/emitAgentEvent.test.js"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

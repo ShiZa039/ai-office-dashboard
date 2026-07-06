@@ -151,7 +151,10 @@ export class UsageWatcher {
       const cmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
       const full = ['--yes', 'ccusage@latest', ...args];
       const child = spawn(cmd, full, {
-        shell: false,
+        // Node >= 20.12 refuses to spawn .cmd/.bat directly without a shell on
+        // Windows (CVE-2024-27980 fix) -> 'spawn EINVAL'. All args here are
+        // code-controlled (no user input), so shell quoting is not a concern.
+        shell: process.platform === 'win32',
         windowsHide: true,
         env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0' },
       });

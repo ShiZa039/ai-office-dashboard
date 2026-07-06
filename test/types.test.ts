@@ -1,11 +1,18 @@
 import * as assert from 'assert';
 import { DEFAULT_AGENT_ROOMS, getRoomForAgent, inferRoomByName } from '../src/types';
 
-// --- DEFAULT_AGENT_ROOMS direct hits still work ---
+// --- Built-in Claude Code agent types map directly ---
 
-assert.strictEqual(getRoomForAgent('backend-lead'), 'backend', 'known backend-lead');
-assert.strictEqual(getRoomForAgent('ai-lead'), 'ai-lab', 'known ai-lead');
-assert.strictEqual(getRoomForAgent('product-director'), 'directors', 'known product-director');
+assert.strictEqual(getRoomForAgent('general-purpose'), 'lobby', 'general-purpose → lobby');
+assert.strictEqual(getRoomForAgent('Explore'), 'lobby', 'Explore → lobby');
+assert.strictEqual(getRoomForAgent('Plan'), 'directors', 'Plan → directors');
+assert.strictEqual(getRoomForAgent('code-reviewer'), 'qa', 'code-reviewer → qa');
+
+// --- Generic team names resolve via the keyword heuristic (no project profile) ---
+
+assert.strictEqual(getRoomForAgent('backend-lead'), 'backend', 'backend-lead via heuristic');
+assert.strictEqual(getRoomForAgent('ai-lead'), 'ai-lab', 'ai-lead via heuristic');
+assert.strictEqual(getRoomForAgent('product-director'), 'directors', 'product-director via heuristic');
 
 // --- customMap overrides built-in defaults ---
 
@@ -28,6 +35,17 @@ assert.strictEqual(
 assert.strictEqual(inferRoomByName('docker-guru'), 'devops', 'docker token → devops');
 assert.strictEqual(inferRoomByName('llm-evaluator'), 'ai-lab', 'llm token → ai-lab');
 assert.strictEqual(inferRoomByName('telegram-bot-maintainer'), 'integrations', 'telegram → integrations');
+
+// --- IoT domain gets its own room ---
+
+assert.strictEqual(inferRoomByName('esp32-firmware-specialist'), 'iot', 'esp32/firmware → iot');
+assert.strictEqual(inferRoomByName('mqtt-broker-specialist'), 'iot', 'mqtt → iot');
+assert.strictEqual(inferRoomByName('telemetry-anomaly-specialist'), 'iot', 'telemetry → iot');
+assert.strictEqual(inferRoomByName('device-provisioning-specialist'), 'iot', 'device/provisioning → iot');
+
+// --- iac is infrastructure-as-code → devops, not security ---
+
+assert.strictEqual(inferRoomByName('iac-specialist'), 'devops', 'iac → devops');
 
 // --- Unknown-unknowns go to lobby ---
 

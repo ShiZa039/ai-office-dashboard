@@ -9,11 +9,17 @@ var agentRoomCache = {};
 var TIMELINE_WINDOW_KEY = "claudeOffice.timelineWindowMs";
 var currentTimelineMs = 5 * 60 * 1000;
 var lastUsage = null;
+var HIDE_IDLE_KEY = "claudeOffice.hideIdleAgents";
+var hideIdle = true;
+try {
+  var savedHideIdle = localStorage.getItem(HIDE_IDLE_KEY);
+  if (savedHideIdle !== null) hideIdle = savedHideIdle === "1";
+} catch(e) { /* localStorage unavailable */ }
 
 var ROOM_COLORS = {
   directors: "#eab308", backend: "#3b82f6", frontend: "#a855f7",
   qa: "#22c55e", security: "#ef4444", devops: "#f97316",
-  integrations: "#06b6d4", "ai-lab": "#ec4899", lobby: "#14b8a6",
+  integrations: "#06b6d4", "ai-lab": "#ec4899", iot: "#84cc16", lobby: "#14b8a6",
 };
 
 function getAgentIcon(agentName, room) {
@@ -42,12 +48,68 @@ function setText(id, val) {
   if (el) el.textContent = String(val);
 }
 
+/**
+ * "claude-fable-5" → "Fable 5", "claude-opus-4-8" → "Opus 4.8",
+ * "claude-haiku-4-5-20251001" → "Haiku 4.5", "claude-3-5-sonnet-…" → "Sonnet 3.5".
+ * Falls back to the raw ID when nothing recognizable remains.
+ */
+function formatModelName(id) {
+  if (!id) return "";
+  var parts = String(id).replace(/^.*?claude-/, "").split("-");
+  var nums = [], words = [];
+  for (var i = 0; i < parts.length; i++) {
+    var p = parts[i];
+    if (/^\d{8}$/.test(p)) continue; // date stamp
+    if (/^v\d/.test(p)) continue;    // bedrock version suffix
+    if (/^\d+$/.test(p)) nums.push(p);
+    else if (p) words.push(p.charAt(0).toUpperCase() + p.slice(1));
+  }
+  if (words.length === 0) return id;
+  var name = words.join(" ");
+  return nums.length > 0 ? name + " " + nums.join(".") : name;
+}
+
+function updateIdleToggle(idleCount) {
+  var btn = document.getElementById("idle-toggle");
+  if (!btn) return;
+  btn.classList.toggle("idle-toggle--on", !hideIdle);
+  btn.textContent = hideIdle ? "□ " + idleCount + " idle" : "■ " + idleCount + " idle";
+  btn.title = hideIdle
+    ? "Idle agents are collapsed into per-room “+N” chips. Click to show them."
+    : "Click to collapse idle agents into per-room “+N” chips.";
+}
+
+function initIdleToggle() {
+  var btn = document.getElementById("idle-toggle");
+  if (!btn) return;
+  btn.addEventListener("click", function() {
+    hideIdle = !hideIdle;
+    try { localStorage.setItem(HIDE_IDLE_KEY, hideIdle ? "1" : "0"); } catch(e) {}
+    render();
+  });
+}
+
+function setModel(model) {
+  var el = document.getElementById("office-model");
+  if (!el) return;
+  if (model) {
+    el.textContent = formatModelName(model);
+    el.title = model;
+    el.hidden = false;
+  } else {
+    el.textContent = "";
+    el.removeAttribute("title");
+    el.hidden = true;
+  }
+}
+
 function render() {
   // noqa: secret
   document.querySelectorAll(".room .agents").forEach(function(el) { el.innerHTML = ""; }); // noqa: secret
   document.querySelectorAll(".room").forEach(function(el) { el.classList.remove("room--active"); }); // noqa: secret
 
   var working = 0, done = 0, errors = 0, total = 0;
+  var idleByRoom = {};
   var entries = Object.entries(currentAgents);
 
   for (var i = 0; i < entries.length; i++) {
@@ -56,6 +118,13 @@ function render() {
     if (agent.state === "working") working++;
     if (agent.state === "done") done++;
     if (agent.state === "error") errors++;
+
+    // Compact mode: idle agents collapse into a per-room "+N" chip so a big
+    // roster doesn't blow up the dashboard height.
+    if (hideIdle && agent.state === "idle") {
+      (idleByRoom[agent.room] = idleByRoom[agent.room] || []).push(name);
+      continue;
+    }
 
     var roomEl = document.querySelector('.room[data-room="' + agent.room + '"] .agents');
     if (!roomEl) continue;
@@ -78,6 +147,19 @@ function render() {
       '<div class="agent-tooltip">' + tips + "</div>";
     roomEl.appendChild(el);
   }
+
+  Object.keys(idleByRoom).forEach(function(room) {
+    var roomEl = document.querySelector('.room[data-room="' + room + '"] .agents');
+    if (!roomEl) return;
+    var names = idleByRoom[room];
+    var chip = document.createElement("div");
+    chip.className = "agent agent--idle agent--idle-count";
+    chip.textContent = "+" + names.length;
+    chip.title = names.length + " idle: " + names.map(shortName).join(", ");
+    roomEl.appendChild(chip);
+  });
+
+  updateIdleToggle(total - working - done - errors);
 
   setText("stat-working", working);
   setText("stat-done", done);
@@ -230,12 +312,13 @@ window.addEventListener("message", function(evt) { // noqa: secret
       }
     }
     currentAgents = msg.agents;
+    if (typeof msg.model !== "undefined") setModel(msg.model);
     render();
   } else if (msg.type === "usage_update") {
     lastUsage = msg.data;
     renderUsage();
   } else if (msg.type === "usage_error") {
-    renderUsageError(msg.message);
+    renderUsageError(msg.source, msg.message);
   }
 });
 
@@ -274,51 +357,131 @@ function formatDuration(mins) {
   return h + "h" + (m > 0 ? " " + m + "m" : "");
 }
 
-function updateBar(kind, cost, limit, subtitle) {
-  var bar = document.querySelector('.usage-bar[data-kind="' + kind + '"]');
+function fillBar(bar, pct, valueText) {
   if (!bar) return;
   var fill = bar.querySelector(".usage-bar-fill");
   var value = bar.querySelector(".usage-bar-value");
-  var pct = 0;
-  if (limit && limit > 0) pct = Math.min(100, (cost / limit) * 100);
   if (fill) {
-    fill.style.width = pct.toFixed(1) + "%";
+    fill.style.width = Math.max(0, Math.min(100, pct)).toFixed(1) + "%";
     fill.classList.remove("usage-bar-fill--warn", "usage-bar-fill--crit");
     if (pct >= 90) fill.classList.add("usage-bar-fill--crit");
     else if (pct >= 70) fill.classList.add("usage-bar-fill--warn");
   }
-  if (value) {
-    var txt = formatUsd(cost);
-    if (limit && limit > 0) txt += " / " + formatUsd(limit) + " (" + pct.toFixed(0) + "%)";
-    if (subtitle) txt += "  \u00b7  " + subtitle;
-    value.textContent = txt;
+  if (value) value.textContent = valueText;
+}
+
+function updateBar(kind, cost, limit, subtitle) {
+  var pct = 0;
+  if (limit && limit > 0) pct = Math.min(100, (cost / limit) * 100);
+  var txt = formatUsd(cost);
+  if (limit && limit > 0) txt += " / " + formatUsd(limit) + " (" + pct.toFixed(0) + "%)";
+  if (subtitle) txt += "  \u00b7  " + subtitle;
+  fillBar(document.querySelector('.usage-bar[data-kind="' + kind + '"]'), pct, txt);
+}
+
+/** Keep #usage-subscription bar elements in sync with the reported limit kinds. */
+function ensureSubscriptionBars(section, limits) {
+  var wantKinds = limits.map(function(l) { return l.kind; }).join("|");
+  if (section.getAttribute("data-kinds") === wantKinds) return;
+  section.setAttribute("data-kinds", wantKinds);
+  section.textContent = "";
+  for (var i = 0; i < limits.length; i++) {
+    var bar = document.createElement("div");
+    bar.className = "usage-bar";
+    bar.setAttribute("data-kind", limits[i].kind);
+    var label = document.createElement("div");
+    label.className = "usage-bar-label";
+    var track = document.createElement("div");
+    track.className = "usage-bar-track";
+    var fill = document.createElement("div");
+    fill.className = "usage-bar-fill";
+    track.appendChild(fill);
+    var value = document.createElement("div");
+    value.className = "usage-bar-value";
+    value.textContent = "\u2014";
+    bar.appendChild(label);
+    bar.appendChild(track);
+    bar.appendChild(value);
+    section.appendChild(bar);
   }
+}
+
+function planLabel(plan) {
+  if (!plan) return "";
+  return String(plan)
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, function(ch) { return ch.toUpperCase(); });
+}
+
+function resetText(resetsAt) {
+  if (!resetsAt) return "";
+  var t = Date.parse(resetsAt);
+  if (isNaN(t)) return "";
+  var mins = (t - Date.now()) / 60000;
+  if (mins <= 0) return "resets soon";
+  return "resets in " + formatDuration(mins);
 }
 
 function renderUsage() {
   if (!lastUsage) return;
-  var u = lastUsage;
-  var upd = document.getElementById("usage-updated");
-  if (upd) upd.textContent = "updated " + formatTime(u.fetchedAt);
+  var sub = lastUsage.subscription;
+  var cost = lastUsage.cost;
 
-  var blockSubtitle = "";
-  if (u.block) {
-    if (u.block.isActive && u.block.remainingMinutes != null) {
-      blockSubtitle = formatDuration(u.block.remainingMinutes) + " left";
-    } else if (!u.block.isActive) {
-      blockSubtitle = "no active block";
+  var subSection = document.getElementById("usage-subscription");
+  var costSection = document.getElementById("usage-cost");
+  var planEl = document.getElementById("usage-plan");
+  var upd = document.getElementById("usage-updated");
+
+  if (sub && sub.limits && sub.limits.length > 0 && subSection instanceof HTMLElement) {
+    subSection.hidden = false;
+    if (planEl instanceof HTMLElement) {
+      var label = planLabel(sub.plan);
+      planEl.hidden = !label;
+      planEl.textContent = label;
     }
+    ensureSubscriptionBars(subSection, sub.limits);
+    for (var i = 0; i < sub.limits.length; i++) {
+      var lim = sub.limits[i];
+      var bar = subSection.querySelector('.usage-bar[data-kind="' + lim.kind + '"]');
+      if (!bar) continue;
+      var labelEl = bar.querySelector(".usage-bar-label");
+      if (labelEl) labelEl.textContent = lim.label;
+      var txt = lim.utilization.toFixed(0) + "%";
+      var reset = resetText(lim.resetsAt);
+      if (reset) txt += "  \u00b7  " + reset;
+      fillBar(bar, lim.utilization, txt);
+    }
+    if (upd) upd.textContent = "updated " + formatTime(sub.fetchedAt);
   }
-  updateBar("block", u.block ? u.block.costUSD : 0, u.limits.block, blockSubtitle);
-  updateBar("weekly", u.weekly ? u.weekly.totalCost : 0, u.limits.weekly, "");
-  updateBar("weekly-opus", u.weekly ? u.weekly.opusCost : 0, u.limits.weeklyOpus, "");
+
+  if (cost) {
+    if (costSection instanceof HTMLElement) costSection.hidden = false;
+    var blockSubtitle = "";
+    if (cost.block) {
+      if (cost.block.isActive && cost.block.remainingMinutes != null) {
+        blockSubtitle = formatDuration(cost.block.remainingMinutes) + " left";
+      } else if (!cost.block.isActive) {
+        blockSubtitle = "no active block";
+      }
+    }
+    updateBar("block", cost.block ? cost.block.costUSD : 0, cost.limits.block, blockSubtitle);
+    updateBar("weekly", cost.weekly ? cost.weekly.totalCost : 0, cost.limits.weekly, "");
+    updateBar("weekly-opus", cost.weekly ? cost.weekly.opusCost : 0, cost.limits.weeklyOpus, "");
+    if (!sub && upd) upd.textContent = "updated " + formatTime(cost.fetchedAt);
+  } else if (costSection instanceof HTMLElement) {
+    costSection.hidden = true;
+  }
 }
 
-function renderUsageError(message) {
+function renderUsageError(source, message) {
+  // Don't let a cost-source hiccup wipe live subscription data (and vice versa).
+  if (lastUsage && lastUsage.subscription && source === "cost") return;
   var upd = document.getElementById("usage-updated");
   if (upd) upd.textContent = "error: " + message;
 }
 
 initTimelineSelector();
+initIdleToggle();
 vscode.postMessage({ type: "webview_ready" });
 setInterval(function() { renderTimeline(); }, 2000);
+setInterval(function() { renderUsage(); }, 30000); // keep "resets in …" countdown fresh

@@ -22,6 +22,8 @@
   --pink-dim: #500724;
   --teal: #14b8a6;
   --teal-dim: #042f2e;
+  --lime: #84cc16;
+  --lime-dim: #1a2e05;
   --room-bg: var(--vscode-sideBar-background, #252526);
   --room-border: var(--vscode-panel-border, #3c3c3c);
   --text-primary: var(--vscode-foreground, #e0e0e0);
@@ -119,6 +121,41 @@ body {
   margin-right: 1px;
 }
 
+.idle-toggle {
+  font-size: 9px;
+  font-family: inherit;
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--room-border);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.idle-toggle:hover {
+  border-color: var(--text-secondary);
+  color: var(--text-primary);
+}
+
+.idle-toggle--on {
+  border-color: var(--blue);
+  color: var(--text-primary);
+}
+
+.office-model {
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--blue);
+  border: 1px solid var(--blue);
+  border-radius: 3px;
+  padding: 0 4px;
+  white-space: nowrap;
+}
+
 .office-status {
   display: flex;
   align-items: center;
@@ -181,6 +218,7 @@ body {
 .room[data-room="devops"]       { --room-accent: var(--orange); }
 .room[data-room="integrations"] { --room-accent: var(--cyan); }
 .room[data-room="ai-lab"]       { --room-accent: var(--pink); }
+.room[data-room="iot"]          { --room-accent: var(--lime); }
 .room[data-room="lobby"]        { --room-accent: var(--teal); }
 
 .room.room--active {
@@ -245,6 +283,15 @@ body {
   border-color: rgba(255,255,255,0.05);
   opacity: 0.4;
   transition: opacity 0.5s ease;
+}
+
+/* Collapsed "+N" chip standing in for a room's idle agents (compact mode). */
+.agent--idle-count {
+  padding: 2px 7px;
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  animation: none;
 }
 
 .agent--working {
@@ -455,6 +502,24 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.usage-plan {
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--blue);
+  border: 1px solid var(--blue);
+  border-radius: 3px;
+  padding: 0 4px;
+  margin: 0 6px;
+}
+
+.usage-group + .usage-group {
+  margin-top: 5px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--room-border);
+}
+
 .usage-bar {
   display: grid;
   grid-template-columns: 80px 1fr auto;
@@ -489,9 +554,12 @@ body {
 .usage-bar-fill--warn { background: var(--yellow); }
 .usage-bar-fill--crit { background: var(--red); }
 
-.usage-bar[data-kind="weekly-opus"] .usage-bar-fill { background: var(--purple); }
-.usage-bar[data-kind="weekly-opus"] .usage-bar-fill--warn { background: var(--yellow); }
-.usage-bar[data-kind="weekly-opus"] .usage-bar-fill--crit { background: var(--red); }
+.usage-bar[data-kind="weekly-opus"] .usage-bar-fill,
+.usage-bar[data-kind="weekly_scoped"] .usage-bar-fill { background: var(--purple); }
+.usage-bar[data-kind="weekly-opus"] .usage-bar-fill--warn,
+.usage-bar[data-kind="weekly_scoped"] .usage-bar-fill--warn { background: var(--yellow); }
+.usage-bar[data-kind="weekly-opus"] .usage-bar-fill--crit,
+.usage-bar[data-kind="weekly_scoped"] .usage-bar-fill--crit { background: var(--red); }
 
 .usage-bar-value {
   font-size: 9px;

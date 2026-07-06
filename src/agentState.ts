@@ -24,7 +24,8 @@ export class AgentStateStore {
   private recentEvents: AgentEvent[] = [];
   private sweepTimer: NodeJS.Timeout | null = null;
   private roomResolver: RoomResolver = (name) => getRoomForAgent(name);
-  private cwdFilter: string | null = null;
+  private cwdFilters: string[] | null = null;
+  private currentModel: string | null = null;
 
   /** Provide a custom agent→room resolver (e.g. merged user config). */
   setRoomResolver(resolver: RoomResolver): void {
@@ -36,20 +37,45 @@ export class AgentStateStore {
   }
 
   /**
-   * Scope this store to one cwd (e.g. the current VSCode workspace folder).
-   * Events whose `cwd` doesn't match are ignored; `session_stop` resets only
-   * agents whose tracked cwd matches. Pass `null` to disable filtering.
+   * Scope this store to one or more cwds (e.g. the current VSCode window's
+   * workspace folders — a multi-root `.code-workspace` has several). Events
+   * whose `cwd` matches none are ignored; `session_stop` resets only agents
+   * whose tracked cwd matches. Pass `null`/`[]` to disable filtering.
    */
-  setCwdFilter(cwd: string | null): void {
-    this.cwdFilter = normalizeCwd(cwd) || null;
+  setCwdFilter(cwd: string | string[] | null): void {
+    const list = (Array.isArray(cwd) ? cwd : [cwd])
+      .map((c) => normalizeCwd(c))
+      .filter(Boolean);
+    this.cwdFilters = list.length > 0 ? list : null;
   }
 
-  /** Returns true if event.cwd is compatible with this store's cwd filter. */
+  /**
+   * Pre-register agents (e.g. the project roster from `.claude/agents/`)
+   * as idle so the office is populated before any events arrive. Existing
+   * agents are left untouched.
+   */
+  seedAgents(names: string[]): void {
+    let changed = false;
+    for (const name of names) {
+      if (!name || this.agents.has(name)) continue;
+      this.agents.set(name, {
+        name,
+        state: 'idle',
+        room: this.roomResolver(name),
+      });
+      changed = true;
+    }
+    if (changed) this.onChange?.();
+  }
+
+  /** Returns true if event.cwd is under any of this store's cwd filters. */
   private matchesCwd(eventCwd: string | undefined): boolean {
-    if (!this.cwdFilter) return true;
+    if (!this.cwdFilters) return true;
     const normalized = normalizeCwd(eventCwd);
     if (!normalized) return false;
-    return normalized === this.cwdFilter || normalized.startsWith(this.cwdFilter + '/');
+    return this.cwdFilters.some(
+      (f) => normalized === f || normalized.startsWith(f + '/'),
+    );
   }
 
   start(): void {
@@ -67,6 +93,12 @@ export class AgentStateStore {
   processEvent(event: AgentEvent): void {
     // cwd-scoped store drops events from other windows/projects entirely.
     if (!this.matchesCwd(event.cwd)) return;
+
+    // Any event may carry the session model (session_start directly, others
+    // via the transcript) — remember the newest one seen.
+    if (event.model) {
+      this.currentModel = event.model;
+    }
 
     if (event.event === 'agent_start' || event.event === 'agent_stop') {
       this.recentEvents.push(event);
@@ -139,6 +171,11 @@ export class AgentStateStore {
     return [...this.recentEvents];
   }
 
+  /** Model ID last seen for this (cwd-scoped) session, or null if unknown. */
+  getModel(): string | null {
+    return this.currentModel;
+  }
+
   clear(): void {
     for (const timer of this.doneTimers.values()) {
       clearTimeout(timer);
@@ -146,6 +183,7 @@ export class AgentStateStore {
     this.doneTimers.clear();
     this.agents.clear();
     this.recentEvents = [];
+    this.currentModel = null;
   }
 
   private isStale(ts: string): boolean {
