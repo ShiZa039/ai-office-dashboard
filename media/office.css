@@ -216,6 +216,24 @@ body {
   60% { transform: rotate(-8deg); }
 }
 
+/* Banner variant: the main model is working on a turn. */
+.waiting-banner--working {
+  background: rgba(59, 130, 246, 0.08);
+  border-color: var(--blue);
+}
+.waiting-banner--working .waiting-title { color: var(--blue); }
+.waiting-banner--working .waiting-hand {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Banner variant: turn just finished (short green flash before hiding). */
+.waiting-banner--done {
+  background: rgba(34, 197, 94, 0.08);
+  border-color: var(--green);
+}
+.waiting-banner--done .waiting-title { color: var(--green); }
+.waiting-banner--done .waiting-hand { animation: none; }
+
 .status-dot--wait {
   background: var(--yellow);
   box-shadow: 0 0 6px var(--yellow);

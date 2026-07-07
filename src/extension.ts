@@ -9,7 +9,8 @@ import { UsageWatcher } from './usageWatcher';
 import { SubscriptionUsageWatcher } from './subscriptionUsage';
 import { discoverProjectAgents } from './agentRoster';
 import { ensureHooksOnActivation, installHooks } from './hookInstaller';
-import { getRoomForAgent } from './types';
+import { MAIN_AGENT_NAME, getRoomForAgent } from './types';
+import { isRussianUi } from './locale';
 
 /**
  * Read a project-local agent→room map from `<folder>/.claude/office-rooms.json`
@@ -118,26 +119,49 @@ export function activate(context: vscode.ExtensionContext) {
     const waiting = store.getWaiting();
     let working = 0;
     let errors = 0;
-    const total = Object.keys(snapshot).length;
+    let total = 0;
+    let mainWorking = false;
     for (const agent of Object.values(snapshot)) {
+      if (agent.name === MAIN_AGENT_NAME) {
+        // The main model is a separate signal, not one of the agents.
+        mainWorking = agent.state === 'working';
+        continue;
+      }
+      total++;
       if (agent.state === 'working') working += agent.activeCount ?? 1;
       if (agent.state === 'error') errors++;
     }
 
+    const ru = isRussianUi();
     statusBarItem.backgroundColor = undefined;
     if (waiting) {
       statusBarItem.text = '✋ Claude';
       statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
-      statusBarItem.tooltip = `Claude is waiting for you${waiting.message ? `: ${waiting.message}` : ''}`;
+      statusBarItem.tooltip = ru
+        ? `Claude ждёт вас${waiting.message ? `: ${waiting.message}` : ''}`
+        : `Claude is waiting for you${waiting.message ? `: ${waiting.message}` : ''}`;
     } else if (errors > 0) {
-      statusBarItem.text = `$(error) ${errors} agent${errors > 1 ? 's' : ''}`;
-      statusBarItem.tooltip = `Claude Office: ${errors} agent(s) finished with errors`;
+      statusBarItem.text = ru
+        ? `$(error) ${errors} с ошибкой`
+        : `$(error) ${errors} agent${errors > 1 ? 's' : ''}`;
+      statusBarItem.tooltip = ru
+        ? `Claude Office: агентов, завершившихся с ошибкой: ${errors}`
+        : `Claude Office: ${errors} agent(s) finished with errors`;
     } else if (working > 0) {
-      statusBarItem.text = `$(pulse) ${working} working`;
-      statusBarItem.tooltip = `Claude Office: ${working} agent(s) working`;
+      statusBarItem.text = ru ? `$(pulse) ${working} в работе` : `$(pulse) ${working} working`;
+      statusBarItem.tooltip = ru
+        ? `Claude Office: агентов в работе: ${working}`
+        : `Claude Office: ${working} agent(s) working`;
+    } else if (mainWorking) {
+      statusBarItem.text = '$(pulse) Claude';
+      statusBarItem.tooltip = ru
+        ? 'Claude Office: основная модель работает над ходом (без делегирования агентам)'
+        : 'Claude Office: the main model is working on the turn (no agents delegated)';
     } else if (total > 0) {
-      statusBarItem.text = '$(home) idle';
-      statusBarItem.tooltip = `Claude Office: ${total} agents, all idle`;
+      statusBarItem.text = ru ? '$(home) без задач' : '$(home) idle';
+      statusBarItem.tooltip = ru
+        ? `Claude Office: агентов: ${total}, все без задач`
+        : `Claude Office: ${total} agents, all idle`;
     } else {
       statusBarItem.hide();
       return;
@@ -255,6 +279,16 @@ export function activate(context: vscode.ExtensionContext) {
     }
     if (e.affectsConfiguration('claudeOffice.statusBar')) {
       updateStatusBar();
+    }
+    if (e.affectsConfiguration('claudeOffice.language')) {
+      updateStatusBar();
+      // The webview bakes the locale into its HTML at creation, so an open
+      // dashboard keeps the old language until it is reopened or VSCode reloads.
+      void vscode.window.showInformationMessage(
+        isRussianUi()
+          ? 'Claude Office: язык изменён — перезагрузите окно, чтобы дашборд подхватил его.'
+          : 'Claude Office: language changed — reload the window for the dashboard to pick it up.',
+      );
     }
     if (!e.affectsConfiguration('claudeOffice.usage')) return;
 

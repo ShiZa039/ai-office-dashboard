@@ -2,8 +2,9 @@
   "name": "claude-office-dashboard",
   "displayName": "Claude Office Dashboard",
   "description": "Universal real-time agent dashboard for Claude Code: auto-setup hooks, per-project agent view, real subscription plan limits",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "publisher": "shiza039",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/ShiZa039/claude-office-dashboard.git"
@@ -65,6 +66,18 @@
     "configuration": {
       "title": "Claude Office Dashboard",
       "properties": {
+        "claudeOffice.language": {
+          "type": "string",
+          "enum": ["system", "vscode", "en", "ru"],
+          "default": "system",
+          "enumDescriptions": [
+            "Operating system language (default)",
+            "VSCode display language",
+            "English",
+            "Русский"
+          ],
+          "description": "Dashboard UI language. \"system\" follows the OS language even when VSCode itself runs in English."
+        },
         "claudeOffice.eventsFile": {
           "type": "string",
           "default": "",

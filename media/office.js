@@ -10,6 +10,9 @@ var TIMELINE_WINDOW_KEY = "claudeOffice.timelineWindowMs";
 var currentTimelineMs = 5 * 60 * 1000;
 var lastUsage = null;
 var currentWaiting = null;
+// The main chat model is visualized by the top banner, not a room figure.
+var MAIN_AGENT = "Claude (main)";
+var mainWorkingSince = null;
 var HIDE_IDLE_KEY = "claudeOffice.hideIdleAgents";
 var hideIdle = true;
 try {
@@ -22,6 +25,124 @@ var ROOM_COLORS = {
   qa: "#22c55e", security: "#ef4444", devops: "#f97316",
   integrations: "#06b6d4", "ai-lab": "#ec4899", iot: "#84cc16", lobby: "#14b8a6",
 };
+
+// ── UI localization ──
+// The extension stamps VSCode's display language into <html lang="…">.
+// Chrome strings fall back to English; agent names, task texts and hook
+// messages pass through in whatever language they arrive.
+var UI_LOCALE = document.documentElement.getAttribute("lang") || "en";
+var UI_LANG = UI_LOCALE.toLowerCase().split("-")[0];
+var TIME_LOCALE;
+try { new Date().toLocaleTimeString(UI_LOCALE); TIME_LOCALE = UI_LOCALE; } catch(e) { TIME_LOCALE = undefined; }
+
+var MESSAGES = {
+  en: {
+    waitingForYou: "waiting for you",
+    claudeWaiting: "Claude is waiting for you",
+    claudeWorking: "Claude is working",
+    claudeFinished: "Claude finished the turn",
+    statusActive: "{n} active",
+    statusClaudeWorking: "Claude working",
+    statusIdle: "idle",
+    statusOffline: "offline",
+    events: ["event", "events"],
+    idleAgents: ["idle", "idle"],
+    idleTitleCollapsed: "Idle agents are collapsed into per-room “+N” chips. Click to show them.",
+    idleTitleExpanded: "Click to collapse idle agents into per-room “+N” chips.",
+    waitingForEvents: "waiting for events...",
+    resetsSoon: "resets soon",
+    resetsIn: "resets in {d}",
+    updatedAt: "updated {t}",
+    usageError: "error: {m}",
+    forecast: "⚠ {label} hits 100% in ~{d} at the current pace",
+    blockLeft: "{d} left",
+    noActiveBlock: "no active block",
+    unitMin: "m",
+    unitHour: "h",
+    labelWorking: "working",
+    labelDone: "done",
+    labelErrors: "errors",
+    labelTotal: "total",
+    labelCompleted: "completed",
+    labelTimeline: "Timeline",
+    labelPlanUsage: "Plan usage",
+    labelActivityLog: "Activity Log",
+    labelLoading: "loading…",
+    labelBlock: "5-hour block ($)",
+    labelWeekly: "Weekly ($)",
+    labelWeeklyOpus: "Weekly Opus ($)",
+    tl5: "5 min", tl15: "15 min", tl30: "30 min", tl1h: "1 hour", tl6h: "6 hours",
+  },
+  ru: {
+    waitingForYou: "ждёт вашего ответа",
+    claudeWaiting: "Claude ждёт вас",
+    claudeWorking: "Claude работает",
+    claudeFinished: "Claude завершил ход",
+    statusActive: "{n} активно",
+    statusClaudeWorking: "Claude работает",
+    statusIdle: "без задач",
+    statusOffline: "офлайн",
+    events: ["событие", "события", "событий"],
+    idleAgents: ["неактивный", "неактивных", "неактивных"],
+    idleTitleCollapsed: "Неактивные агенты свёрнуты в чипы «+N» по комнатам. Нажмите, чтобы показать их.",
+    idleTitleExpanded: "Нажмите, чтобы свернуть неактивных агентов в чипы «+N» по комнатам.",
+    waitingForEvents: "ожидание событий...",
+    resetsSoon: "скоро сброс",
+    resetsIn: "сброс через {d}",
+    updatedAt: "обновлено {t}",
+    usageError: "ошибка: {m}",
+    forecast: "⚠ {label} достигнет 100% через ~{d} при текущем темпе",
+    blockLeft: "осталось {d}",
+    noActiveBlock: "нет активного блока",
+    unitMin: "м",
+    unitHour: "ч",
+    labelWorking: "в работе",
+    labelDone: "готово",
+    labelErrors: "ошибки",
+    labelTotal: "всего",
+    labelCompleted: "завершено",
+    labelTimeline: "Таймлайн",
+    labelPlanUsage: "Лимиты плана",
+    labelActivityLog: "Журнал активности",
+    labelLoading: "загрузка…",
+    labelBlock: "Блок 5 часов ($)",
+    labelWeekly: "За неделю ($)",
+    labelWeeklyOpus: "Opus за неделю ($)",
+    tl5: "5 мин", tl15: "15 мин", tl30: "30 мин", tl1h: "1 час", tl6h: "6 часов",
+  },
+};
+var UI_MSG = MESSAGES[UI_LANG] || MESSAGES.en;
+
+function tr(key, vars) {
+  var s = UI_MSG[key] != null ? UI_MSG[key] : MESSAGES.en[key];
+  if (s == null) return key;
+  if (typeof s !== "string") s = s[0];
+  if (vars) s = s.replace(/\{(\w+)\}/g, function(_, k) { return vars[k] != null ? String(vars[k]) : ""; });
+  return s;
+}
+
+/** "3 events" / "3 события" — picks the right plural form for the UI language. */
+function trCount(key, n) {
+  var forms = UI_MSG[key] != null ? UI_MSG[key] : MESSAGES.en[key];
+  if (!forms) return n + " " + key;
+  if (typeof forms === "string") return n + " " + forms;
+  var idx;
+  if (UI_LANG === "ru") {
+    var m10 = n % 10, m100 = n % 100;
+    idx = m10 === 1 && m100 !== 11 ? 0 : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? 1 : 2;
+  } else {
+    idx = n === 1 ? 0 : 1;
+  }
+  return n + " " + (forms[idx] || forms[forms.length - 1]);
+}
+
+function localizeDom() {
+  document.querySelectorAll("[data-i18n]").forEach(function(el) {
+    el.textContent = tr(el.getAttribute("data-i18n") || "");
+  });
+  var count = document.getElementById("log-count");
+  if (count) count.textContent = trCount("events", 0);
+}
 
 function getAgentIcon(agentName, room) {
   var avatarMap = window.__AGENT_AVATAR_MAP || {};
@@ -40,7 +161,7 @@ function shortName(name) {
 
 function formatTime(ts) {
   if (!ts) return "";
-  try { return new Date(ts).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" }); }
+  try { return new Date(ts).toLocaleTimeString(TIME_LOCALE, { hour: "2-digit", minute: "2-digit", second: "2-digit" }); }
   catch(e) { return ""; }
 }
 
@@ -74,10 +195,8 @@ function updateIdleToggle(idleCount) {
   var btn = document.getElementById("idle-toggle");
   if (!btn) return;
   btn.classList.toggle("idle-toggle--on", !hideIdle);
-  btn.textContent = hideIdle ? "□ " + idleCount + " idle" : "■ " + idleCount + " idle";
-  btn.title = hideIdle
-    ? "Idle agents are collapsed into per-room “+N” chips. Click to show them."
-    : "Click to collapse idle agents into per-room “+N” chips.";
+  btn.textContent = (hideIdle ? "□ " : "■ ") + trCount("idleAgents", idleCount);
+  btn.title = hideIdle ? tr("idleTitleCollapsed") : tr("idleTitleExpanded");
 }
 
 function initIdleToggle() {
@@ -117,6 +236,7 @@ function render() {
 
   for (var i = 0; i < entries.length; i++) {
     var name = entries[i][0], agent = entries[i][1];
+    if (name === MAIN_AGENT) continue; // shown in the banner, not in a room
     total++;
     if (agent.state === "working") {
       workingEntries++;
@@ -164,7 +284,7 @@ function render() {
     var chip = document.createElement("div");
     chip.className = "agent agent--idle agent--idle-count";
     chip.textContent = "+" + names.length;
-    chip.title = names.length + " idle: " + names.map(shortName).join(", ");
+    chip.title = trCount("idleAgents", names.length) + ": " + names.map(shortName).join(", ");
     roomEl.appendChild(chip);
   });
 
@@ -185,25 +305,65 @@ function render() {
     }
     if (statusText) statusText.textContent = text;
   }
-  if (currentWaiting) setStatus("status-dot--wait", "waiting for you");
-  else if (working > 0) setStatus("status-dot--on", working + " active");
-  else if (total > 0) setStatus("status-dot--off", "idle");
-  else setStatus("status-dot--off", "offline");
+  var mainAgent = currentAgents[MAIN_AGENT];
+  if (currentWaiting) setStatus("status-dot--wait", tr("waitingForYou"));
+  else if (working > 0) setStatus("status-dot--on", tr("statusActive", { n: working }));
+  else if (mainAgent && mainAgent.state === "working") setStatus("status-dot--on", tr("statusClaudeWorking"));
+  else if (total > 0) setStatus("status-dot--off", tr("statusIdle"));
+  else setStatus("status-dot--off", tr("statusOffline"));
 
-  renderWaiting();
+  renderMainBanner();
   renderTimeline();
 }
 
-function renderWaiting() {
+/**
+ * The top banner tracks the MAIN model: yellow "waiting for you" wins,
+ * then blue "working" (with model, duration, ×sessions), a brief green
+ * "finished" flash, hidden when idle.
+ */
+function renderMainBanner() {
   var banner = document.getElementById("waiting-banner");
-  var msgEl = document.getElementById("waiting-msg");
   if (!banner) return;
+  var titleEl = banner.querySelector(".waiting-title");
+  var msgEl = document.getElementById("waiting-msg");
+  var iconEl = banner.querySelector(".waiting-hand");
+  var main = currentAgents[MAIN_AGENT];
+
+  banner.classList.remove("waiting-banner--working", "waiting-banner--done");
+
   if (currentWaiting) {
+    if (iconEl) iconEl.textContent = "✋";
+    if (titleEl) titleEl.textContent = tr("claudeWaiting");
     if (msgEl) msgEl.textContent = currentWaiting.message || "";
     banner.hidden = false;
-  } else {
-    banner.hidden = true;
+    return;
   }
+
+  if (main && main.state === "working") {
+    if (!mainWorkingSince) mainWorkingSince = Date.now();
+    banner.classList.add("waiting-banner--working");
+    if (iconEl) iconEl.textContent = "⚡";
+    var title = tr("claudeWorking");
+    if (main.activeCount > 1) title += " ×" + main.activeCount;
+    var mins = (Date.now() - mainWorkingSince) / 60000;
+    if (mins >= 1) title += " · " + formatDuration(mins);
+    if (titleEl) titleEl.textContent = title;
+    if (msgEl) msgEl.textContent = main.task ? formatModelName(main.task) : "";
+    banner.hidden = false;
+    return;
+  }
+
+  mainWorkingSince = null;
+  if (main && main.state === "done") {
+    banner.classList.add("waiting-banner--done");
+    if (iconEl) iconEl.textContent = "✓";
+    if (titleEl) titleEl.textContent = tr("claudeFinished");
+    if (msgEl) msgEl.textContent = "";
+    banner.hidden = false;
+    return;
+  }
+
+  banner.hidden = true;
 }
 
 function renderTimeline() {
@@ -224,7 +384,7 @@ function renderTimeline() {
     ctx.fillStyle = "#444";
     ctx.font = "8px sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText("waiting for events...", W / 2, H / 2 + 3);
+    ctx.fillText(tr("waitingForEvents"), W / 2, H / 2 + 3);
     return;
   }
 
@@ -271,7 +431,7 @@ function drawTimelineGrid(ctx, W, H, windowMs) {
     var x = (elapsed / totalMin) * W;
     ctx.fillRect(x, 0, 0.5, H);
     var remaining = totalMin - elapsed;
-    var label = unit === "h" ? "-" + Math.round(remaining / 60) + "h" : "-" + Math.round(remaining) + "m";
+    var label = unit === "h" ? "-" + Math.round(remaining / 60) + tr("unitHour") : "-" + Math.round(remaining) + tr("unitMin");
     ctx.fillText(label, x, H - 1);
   }
 }
@@ -292,7 +452,7 @@ function addLogEntry(agent, event, task, room) {
   if (!log) return;
   eventCount++;
   var countEl = document.getElementById("log-count");
-  if (countEl) countEl.textContent = eventCount + " events";
+  if (countEl) countEl.textContent = trCount("events", eventCount);
 
   var isStart = event === "agent_start";
   var isError = event === "agent_stop" && task === "ERROR";
@@ -300,7 +460,7 @@ function addLogEntry(agent, event, task, room) {
   var cls = isStart ? "start" : isError ? "error" : "stop";
   var arrow = isStart ? "▶" : isError ? "✖" : "✔";
   var label = task && task !== "ERROR" ? shortName(agent) + ": " + task : shortName(agent);
-  var time = new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  var time = formatTime(Date.now());
 
   // Main-model turns still land on the timeline, but "completed" counts agents only.
   if (!isStart && !isError && !isMain) completedCount++;
@@ -321,10 +481,10 @@ function addLogEntry(agent, event, task, room) {
 function addWaitingLogEntry(message) {
   var log = document.getElementById("event-log");
   if (!log) return;
-  var time = new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  var time = formatTime(Date.now());
   var entry = document.createElement("div");
   entry.className = "event-log-entry event-log-entry--wait";
-  entry.textContent = time + "  ✋  " + (message || "waiting for you");
+  entry.textContent = time + "  ✋  " + (message || tr("waitingForYou"));
   log.appendChild(entry);
   while (log.children.length > 50) log.removeChild(log.firstChild);
   log.scrollTop = log.scrollHeight;
@@ -394,9 +554,9 @@ function formatUsd(n) {
 
 function formatDuration(mins) {
   if (mins == null || isNaN(mins)) return "";
-  if (mins < 60) return Math.round(mins) + "m";
+  if (mins < 60) return Math.round(mins) + tr("unitMin");
   var h = Math.floor(mins / 60), m = Math.round(mins % 60);
-  return h + "h" + (m > 0 ? " " + m + "m" : "");
+  return h + tr("unitHour") + (m > 0 ? " " + m + tr("unitMin") : "");
 }
 
 function fillBar(bar, pct, valueText) {
@@ -460,8 +620,8 @@ function resetText(resetsAt) {
   var t = Date.parse(resetsAt);
   if (isNaN(t)) return "";
   var mins = (t - Date.now()) / 60000;
-  if (mins <= 0) return "resets soon";
-  return "resets in " + formatDuration(mins);
+  if (mins <= 0) return tr("resetsSoon");
+  return tr("resetsIn", { d: formatDuration(mins) });
 }
 
 // ── Usage burn-rate forecast ──
@@ -529,7 +689,7 @@ function renderForecast(sub) {
     el.hidden = true;
     return;
   }
-  el.textContent = "⚠ " + worst.label + " hits 100% in ~" + formatDuration(mins) + " at the current pace";
+  el.textContent = tr("forecast", { label: worst.label, d: formatDuration(mins) });
   el.classList.toggle("usage-forecast--crit", mins < 60);
   el.hidden = false;
 }
@@ -563,7 +723,7 @@ function renderUsage() {
       if (reset) txt += "  \u00b7  " + reset;
       fillBar(bar, lim.utilization, txt);
     }
-    if (upd) upd.textContent = "updated " + formatTime(sub.fetchedAt);
+    if (upd) upd.textContent = tr("updatedAt", { t: formatTime(sub.fetchedAt) });
   }
   renderForecast(sub);
 
@@ -572,15 +732,15 @@ function renderUsage() {
     var blockSubtitle = "";
     if (cost.block) {
       if (cost.block.isActive && cost.block.remainingMinutes != null) {
-        blockSubtitle = formatDuration(cost.block.remainingMinutes) + " left";
+        blockSubtitle = tr("blockLeft", { d: formatDuration(cost.block.remainingMinutes) });
       } else if (!cost.block.isActive) {
-        blockSubtitle = "no active block";
+        blockSubtitle = tr("noActiveBlock");
       }
     }
     updateBar("block", cost.block ? cost.block.costUSD : 0, cost.limits.block, blockSubtitle);
     updateBar("weekly", cost.weekly ? cost.weekly.totalCost : 0, cost.limits.weekly, "");
     updateBar("weekly-opus", cost.weekly ? cost.weekly.opusCost : 0, cost.limits.weeklyOpus, "");
-    if (!sub && upd) upd.textContent = "updated " + formatTime(cost.fetchedAt);
+    if (!sub && upd) upd.textContent = tr("updatedAt", { t: formatTime(cost.fetchedAt) });
   } else if (costSection instanceof HTMLElement) {
     costSection.hidden = true;
   }
@@ -590,11 +750,12 @@ function renderUsageError(source, message) {
   // Don't let a cost-source hiccup wipe live subscription data (and vice versa).
   if (lastUsage && lastUsage.subscription && source === "cost") return;
   var upd = document.getElementById("usage-updated");
-  if (upd) upd.textContent = "error: " + message;
+  if (upd) upd.textContent = tr("usageError", { m: message });
 }
 
+localizeDom();
 initTimelineSelector();
 initIdleToggle();
 vscode.postMessage({ type: "webview_ready" });
-setInterval(function() { renderTimeline(); }, 2000);
+setInterval(function() { renderTimeline(); renderMainBanner(); }, 2000); // banner: keep "· Nm" duration fresh
 setInterval(function() { renderUsage(); }, 30000); // keep "resets in …" countdown fresh

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="{{lang}}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -17,14 +17,14 @@
       <button class="idle-toggle" id="idle-toggle" type="button">idle</button>
       <div class="office-status" id="office-status">
         <span class="status-dot status-dot--off"></span>
-        <span id="status-text">offline</span>
+        <span id="status-text" data-i18n="statusOffline">offline</span>
       </div>
     </div>
 
     <div class="waiting-banner" id="waiting-banner" hidden>
       <span class="waiting-hand">&#9995;</span>
       <div class="waiting-text">
-        <div class="waiting-title">Claude is waiting for you</div>
+        <div class="waiting-title" data-i18n="claudeWaiting">Claude is waiting for you</div>
         <div class="waiting-msg" id="waiting-msg"></div>
       </div>
     </div>
@@ -105,35 +105,35 @@
     <div class="stats-bar">
       <div class="stat">
         <span class="stat-value stat-value--working" id="stat-working">0</span>
-        <span class="stat-label">working</span>
+        <span class="stat-label" data-i18n="labelWorking">working</span>
       </div>
       <div class="stat">
         <span class="stat-value stat-value--done" id="stat-done">0</span>
-        <span class="stat-label">done</span>
+        <span class="stat-label" data-i18n="labelDone">done</span>
       </div>
       <div class="stat">
         <span class="stat-value stat-value--error" id="stat-errors">0</span>
-        <span class="stat-label">errors</span>
+        <span class="stat-label" data-i18n="labelErrors">errors</span>
       </div>
       <div class="stat">
         <span class="stat-value" id="stat-total">0</span>
-        <span class="stat-label">total</span>
+        <span class="stat-label" data-i18n="labelTotal">total</span>
       </div>
       <div class="stat">
         <span class="stat-value stat-value--session" id="stat-completed">0</span>
-        <span class="stat-label">completed</span>
+        <span class="stat-label" data-i18n="labelCompleted">completed</span>
       </div>
     </div>
 
     <div class="timeline-section">
       <div class="log-header">
-        <span class="log-title">Timeline</span>
+        <span class="log-title" data-i18n="labelTimeline">Timeline</span>
         <select id="timeline-window" class="timeline-window-select" aria-label="Timeline window">
-          <option value="300000">5 min</option>
-          <option value="900000">15 min</option>
-          <option value="1800000">30 min</option>
-          <option value="3600000">1 hour</option>
-          <option value="21600000">6 hours</option>
+          <option value="300000" data-i18n="tl5">5 min</option>
+          <option value="900000" data-i18n="tl15">15 min</option>
+          <option value="1800000" data-i18n="tl30">30 min</option>
+          <option value="3600000" data-i18n="tl1h">1 hour</option>
+          <option value="21600000" data-i18n="tl6h">6 hours</option>
         </select>
       </div>
       <canvas id="timeline" class="timeline-canvas"></canvas>
@@ -141,26 +141,26 @@
 
     <div class="usage-panel" id="usage-panel">
       <div class="usage-header">
-        <span class="usage-title">Plan usage</span>
+        <span class="usage-title" data-i18n="labelPlanUsage">Plan usage</span>
         <span class="usage-plan" id="usage-plan" hidden></span>
-        <span class="usage-updated" id="usage-updated">loading&hellip;</span>
+        <span class="usage-updated" id="usage-updated" data-i18n="labelLoading">loading&hellip;</span>
       </div>
       <!-- Subscription limit bars are built dynamically from the API response. -->
       <div class="usage-group" id="usage-subscription" hidden></div>
       <div class="usage-forecast" id="usage-forecast" hidden></div>
       <div class="usage-group" id="usage-cost" hidden>
         <div class="usage-bar" data-kind="block">
-          <div class="usage-bar-label">5-hour block ($)</div>
+          <div class="usage-bar-label" data-i18n="labelBlock">5-hour block ($)</div>
           <div class="usage-bar-track"><div class="usage-bar-fill"></div></div>
           <div class="usage-bar-value">&mdash;</div>
         </div>
         <div class="usage-bar" data-kind="weekly">
-          <div class="usage-bar-label">Weekly ($)</div>
+          <div class="usage-bar-label" data-i18n="labelWeekly">Weekly ($)</div>
           <div class="usage-bar-track"><div class="usage-bar-fill"></div></div>
           <div class="usage-bar-value">&mdash;</div>
         </div>
         <div class="usage-bar" data-kind="weekly-opus">
-          <div class="usage-bar-label">Weekly Opus ($)</div>
+          <div class="usage-bar-label" data-i18n="labelWeeklyOpus">Weekly Opus ($)</div>
           <div class="usage-bar-track"><div class="usage-bar-fill"></div></div>
           <div class="usage-bar-value">&mdash;</div>
         </div>
@@ -168,7 +168,7 @@
     </div>
 
     <div class="log-header">
-      <span class="log-title">Activity Log</span>
+      <span class="log-title" data-i18n="labelActivityLog">Activity Log</span>
       <span class="log-count" id="log-count">0 events</span>
     </div>
     <div class="event-log" id="event-log"></div>

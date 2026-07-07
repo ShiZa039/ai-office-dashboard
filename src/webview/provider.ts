@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { AgentState, SessionWaiting } from '../types';
+import { uiLocale } from '../locale';
 
 interface WebviewSlot {
   webview: vscode.Webview;
@@ -189,6 +190,8 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
     html = html.replace('{{avatarsUri}}', avatarsUri.toString());
     html = html.replace(/\{\{cspSource\}\}/g, webview.cspSource);
     html = html.replace(/\{\{nonce\}\}/g, nonce);
+    // Resolved UI locale (e.g. "ru-RU") — the webview localizes its chrome from it.
+    html = html.replace(/\{\{lang\}\}/g, uiLocale());
 
     return html;
   }
