@@ -175,6 +175,53 @@ body {
 .status-dot--off { background: #555; }
 .status-dot--on { background: var(--green); box-shadow: 0 0 6px var(--green); animation: statusPulse 2s ease infinite; }
 
+/* ── Waiting banner (Claude blocked on the user) ── */
+.waiting-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(234, 179, 8, 0.08);
+  border: 1px solid var(--yellow);
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  animation: agentAppear 0.3s ease;
+}
+
+.waiting-hand {
+  font-size: 16px;
+  line-height: 1;
+  transform-origin: 70% 85%;
+  animation: handWave 1.4s ease-in-out infinite;
+}
+
+.waiting-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--yellow);
+}
+
+.waiting-msg {
+  font-size: 9px;
+  color: var(--text-secondary);
+}
+
+.waiting-msg:empty { display: none; }
+
+@keyframes handWave {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(16deg); }
+  60% { transform: rotate(-8deg); }
+}
+
+.status-dot--wait {
+  background: var(--yellow);
+  box-shadow: 0 0 6px var(--yellow);
+  animation: pulse 1.2s ease infinite;
+}
+
 /* ── Floor grid ── */
 .floor {
   display: grid;
@@ -333,6 +380,17 @@ body {
 .agent--working .agent-icon { color: var(--blue); filter: drop-shadow(0 0 2px var(--blue)); }
 .agent--done .agent-icon { color: var(--green); filter: drop-shadow(0 0 2px var(--green)); }
 .agent--error .agent-icon { color: var(--red); filter: drop-shadow(0 0 2px var(--red)); }
+
+/* "×N" badge — parallel instances of the same agent type. */
+.agent-instances {
+  font-size: 8px;
+  font-weight: 700;
+  color: var(--blue);
+  background: rgba(59, 130, 246, 0.15);
+  border-radius: 6px;
+  padding: 0 4px;
+  flex-shrink: 0;
+}
 
 .agent-name {
   white-space: nowrap;
@@ -561,6 +619,17 @@ body {
 .usage-bar[data-kind="weekly-opus"] .usage-bar-fill--crit,
 .usage-bar[data-kind="weekly_scoped"] .usage-bar-fill--crit { background: var(--red); }
 
+/* Burn-rate forecast line under the subscription bars. */
+.usage-forecast {
+  font-size: 9px;
+  color: var(--yellow);
+  margin-top: 4px;
+  padding-top: 3px;
+  border-top: 1px dashed var(--room-border);
+}
+
+.usage-forecast--crit { color: var(--red); }
+
 .usage-bar-value {
   font-size: 9px;
   font-variant-numeric: tabular-nums;
@@ -613,6 +682,7 @@ body {
 .event-log-entry--start { color: #60a5fa; }
 .event-log-entry--stop { color: #4ade80; }
 .event-log-entry--error { color: #f87171; }
+.event-log-entry--wait { color: #facc15; }
 
 /* ── Animations ── */
 @keyframes pulse {

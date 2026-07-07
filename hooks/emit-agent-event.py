@@ -3,6 +3,7 @@
 Reads hook JSON from stdin, writes event to ~/.claude/agent-events.jsonl.
 Usage: python emit-agent-event.py <event_type>
   event_type: session_start | agent_start | agent_stop | session_stop
+            | agent_waiting | user_prompt
 """
 import json
 import sys
@@ -78,6 +79,11 @@ def main():
             event["result"] = "success"
         else:
             event["task"] = data.get("agent_name", "")
+    elif event_type == "agent_waiting":
+        # Notification hook: carry the reason ("Claude needs your permission…").
+        msg = data.get("message", "")
+        event["task"] = msg[:120] if isinstance(msg, str) else ""
+    # user_prompt carries no payload on purpose — the prompt text stays private.
 
     with open(event_file, "a", encoding="utf-8") as f:
         f.write(json.dumps(event, ensure_ascii=False) + "\n")

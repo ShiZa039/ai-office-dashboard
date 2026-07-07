@@ -14,6 +14,10 @@ export const HOOK_EVENTS: ReadonlyArray<{ hookEvent: string; arg: string }> = [
   { hookEvent: 'SubagentStart', arg: 'agent_start' },
   { hookEvent: 'SubagentStop', arg: 'agent_stop' },
   { hookEvent: 'Stop', arg: 'session_stop' },
+  // Fires when Claude blocks on the user (permission prompt / question).
+  { hookEvent: 'Notification', arg: 'agent_waiting' },
+  // Fires when the user submits a prompt — clears the waiting state.
+  { hookEvent: 'UserPromptSubmit', arg: 'user_prompt' },
 ];
 
 export function hookScriptFileFor(runtime: HookRuntime): string {
@@ -48,13 +52,27 @@ function entryHasMarker(entry: HookEntry): boolean {
 
 /** True if every hook event already has an emit-agent-event registration. */
 export function hasOfficeHooks(settings: unknown): boolean {
-  if (!settings || typeof settings !== 'object') return false;
+  return officeHookCoverage(settings) === 'full';
+}
+
+/**
+ * How many of our hook events are registered. 'partial' means the user
+ * installed an older extension version and new events can be merged in
+ * silently — consent to our hooks was already given.
+ */
+export function officeHookCoverage(settings: unknown): 'none' | 'partial' | 'full' {
+  if (!settings || typeof settings !== 'object') return 'none';
   const hooks = (settings as Record<string, unknown>).hooks;
-  if (!hooks || typeof hooks !== 'object') return false;
-  return HOOK_EVENTS.every(({ hookEvent }) => {
+  if (!hooks || typeof hooks !== 'object') return 'none';
+  let registered = 0;
+  for (const { hookEvent } of HOOK_EVENTS) {
     const entries = (hooks as Record<string, unknown>)[hookEvent];
-    return Array.isArray(entries) && entries.some((e) => entryHasMarker(e as HookEntry));
-  });
+    if (Array.isArray(entries) && entries.some((e) => entryHasMarker(e as HookEntry))) {
+      registered++;
+    }
+  }
+  if (registered === 0) return 'none';
+  return registered === HOOK_EVENTS.length ? 'full' : 'partial';
 }
 
 /**

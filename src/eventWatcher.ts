@@ -11,6 +11,13 @@ export class EventWatcher {
   private watcher: fs.FSWatcher | null = null;
   private pollTimer: NodeJS.Timeout | null = null;
   private lastSize = 0;
+  /**
+   * Bytes after the last newline seen so far. With several hooks appending
+   * concurrently we can read the file mid-write; the incomplete trailing line
+   * is kept here (as bytes, so multi-byte UTF-8 never splits) and prepended
+   * to the next read instead of being dropped.
+   */
+  private leftover: Buffer = Buffer.alloc(0);
   private filePath: string;
   private onEvents: (events: AgentEvent[]) => void;
 
@@ -29,13 +36,18 @@ export class EventWatcher {
       fs.writeFileSync(this.filePath, '');
     }
 
-    // Read existing content
+    // Read existing content (complete lines only — see readNewLines)
     const stat = fs.statSync(this.filePath);
     if (stat.size > 0) {
-      const content = fs.readFileSync(this.filePath, 'utf-8');
-      const events = parseLines(content);
-      if (events.length > 0) {
-        this.onEvents(events);
+      const content = fs.readFileSync(this.filePath);
+      const lastNewline = content.lastIndexOf(0x0a);
+      this.leftover =
+        lastNewline === -1 ? content : Buffer.from(content.subarray(lastNewline + 1));
+      if (lastNewline !== -1) {
+        const events = parseLines(content.subarray(0, lastNewline + 1).toString('utf-8'));
+        if (events.length > 0) {
+          this.onEvents(events);
+        }
       }
     }
     this.lastSize = stat.size;
@@ -73,6 +85,7 @@ export class EventWatcher {
         // File was truncated or unchanged
         if (stat.size < this.lastSize) {
           this.lastSize = 0;
+          this.leftover = Buffer.alloc(0);
         }
         return;
       }
@@ -84,8 +97,16 @@ export class EventWatcher {
 
       this.lastSize = stat.size;
 
-      const newText = buffer.toString('utf-8');
-      const events = parseLines(newText);
+      // Only lines terminated by \n are complete; hold the rest for next read.
+      const chunk = Buffer.concat([this.leftover, buffer]);
+      const lastNewline = chunk.lastIndexOf(0x0a);
+      if (lastNewline === -1) {
+        this.leftover = chunk;
+        return;
+      }
+      this.leftover = Buffer.from(chunk.subarray(lastNewline + 1));
+
+      const events = parseLines(chunk.subarray(0, lastNewline + 1).toString('utf-8'));
       if (events.length > 0) {
         this.onEvents(events);
       }

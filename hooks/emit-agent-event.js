@@ -6,6 +6,7 @@
  * Reads hook JSON from stdin, appends event to ~/.claude/agent-events.jsonl.
  * Usage: node emit-agent-event.js <event_type>
  *   event_type: session_start | agent_start | agent_stop | session_stop
+ *             | agent_waiting | user_prompt
  */
 'use strict';
 const fs = require('fs');
@@ -85,7 +86,12 @@ function emit(raw) {
     } else {
       event.task = data.agent_name || '';
     }
+  } else if (eventType === 'agent_waiting') {
+    // Notification hook: carry the reason ("Claude needs your permission…").
+    const msg = typeof data.message === 'string' ? data.message : '';
+    event.task = msg.slice(0, 120);
   }
+  // user_prompt carries no payload on purpose — the prompt text stays private.
 
   fs.appendFileSync(eventFile, JSON.stringify(event) + '\n', 'utf-8');
 }

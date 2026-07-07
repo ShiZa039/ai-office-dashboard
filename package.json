@@ -2,7 +2,7 @@
   "name": "claude-office-dashboard",
   "displayName": "Claude Office Dashboard",
   "description": "Universal real-time agent dashboard for Claude Code: auto-setup hooks, per-project agent view, real subscription plan limits",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "publisher": "shiza039",
   "repository": {
     "type": "git",
@@ -74,6 +74,11 @@
           "type": "boolean",
           "default": true,
           "description": "Offer to install Claude Code hooks automatically when they are missing, and keep hook scripts up to date"
+        },
+        "claudeOffice.statusBar.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a status bar item with agent activity; turns into a warning when Claude is waiting for your input"
         },
         "claudeOffice.roster.enabled": {
           "type": "boolean",

@@ -1,7 +1,16 @@
 /** Raw event from JSONL file */
 export interface AgentEvent {
   ts: string;
-  event: 'session_start' | 'agent_start' | 'agent_stop' | 'session_stop';
+  event:
+    | 'session_start'
+    | 'agent_start'
+    | 'agent_stop'
+    | 'session_stop'
+    /** Claude Code `Notification` hook — the session needs the user (permission / input). */
+    | 'agent_waiting'
+    /** Claude Code `UserPromptSubmit` hook — the user responded; clears waiting. */
+    | 'user_prompt';
+  /** Only meaningful for agent_start/agent_stop; session-level events leave it empty. */
   agent: string;
   task?: string;
   result?: string;
@@ -20,6 +29,20 @@ export interface AgentState {
   room: string;
   lastActivity?: string;
   cwd?: string;
+  /**
+   * Number of concurrently running instances of this agent type. Events carry
+   * no instance id, so parallel same-type agents share one entry; the badge
+   * stays "working" until the count drains to zero.
+   */
+  activeCount?: number;
+}
+
+/** The session is blocked on the user (permission prompt / question). */
+export interface SessionWaiting {
+  /** Notification text from Claude Code, e.g. "Claude needs your permission to use Bash". */
+  message: string;
+  /** ISO timestamp of the notification. */
+  since: string;
 }
 
 /** Message sent from extension to webview */
@@ -29,6 +52,8 @@ export type WebviewMessage =
       agents: Record<string, AgentState>;
       /** Session model ID; null until any event carries one. */
       model?: string | null;
+      /** Set while Claude waits for the user; null otherwise. */
+      waiting?: SessionWaiting | null;
     }
   | { type: 'usage_update'; data: { subscription: unknown; cost: unknown } }
   | { type: 'usage_error'; source: 'subscription' | 'cost'; message: string };
@@ -48,11 +73,19 @@ export const KNOWN_ROOMS = [
 ] as const;
 
 /**
+ * Pseudo-agent representing the MAIN Claude session (the chat itself).
+ * Working = between a user prompt and the turn's Stop; sits with the bosses
+ * so it's obvious when the orchestrator grinds solo instead of delegating.
+ */
+export const MAIN_AGENT_NAME = 'Claude (main)';
+
+/**
  * Built-in Claude Code agent types. Project-specific agents are resolved by
  * the keyword heuristic below, or explicitly via `.claude/office-rooms.json`
  * in the project / the `claudeOffice.agentRooms` setting.
  */
 export const DEFAULT_AGENT_ROOMS: Record<string, string> = {
+  [MAIN_AGENT_NAME]: 'directors',
   'general-purpose': 'lobby',
   claude: 'lobby',
   Explore: 'lobby',

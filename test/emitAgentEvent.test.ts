@@ -85,5 +85,34 @@ runHook('session_stop', {
   assert.ok(!('model' in e), 'no model field when nothing resolvable');
 }
 
+// --- agent_waiting: Notification message lands in task, truncated to 120 ---
+
+runHook('agent_waiting', {
+  session_id: 'S1',
+  cwd: '/p',
+  message: 'Claude needs your permission to use Bash',
+});
+{
+  const e = lastEvent();
+  assert.strictEqual(e.event, 'agent_waiting');
+  assert.strictEqual(e.task, 'Claude needs your permission to use Bash', 'message carried in task');
+}
+
+runHook('agent_waiting', { session_id: 'S1', cwd: '/p', message: 'x'.repeat(300) });
+{
+  const e = lastEvent();
+  assert.strictEqual((e.task as string).length, 120, 'long message truncated to 120');
+}
+
+// --- user_prompt: no payload recorded (prompt text stays private) ---
+
+runHook('user_prompt', { session_id: 'S1', cwd: '/p', prompt: 'secret question' });
+{
+  const e = lastEvent();
+  assert.strictEqual(e.event, 'user_prompt');
+  assert.ok(!('task' in e), 'prompt text not recorded');
+  assert.ok(!('agent' in e), 'no agent field for session-level event');
+}
+
 fs.rmSync(home, { recursive: true, force: true });
 console.log('All emitAgentEvent tests passed.');

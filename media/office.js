@@ -9,6 +9,7 @@ var agentRoomCache = {};
 var TIMELINE_WINDOW_KEY = "claudeOffice.timelineWindowMs";
 var currentTimelineMs = 5 * 60 * 1000;
 var lastUsage = null;
+var currentWaiting = null;
 var HIDE_IDLE_KEY = "claudeOffice.hideIdleAgents";
 var hideIdle = true;
 try {
@@ -108,14 +109,19 @@ function render() {
   document.querySelectorAll(".room .agents").forEach(function(el) { el.innerHTML = ""; }); // noqa: secret
   document.querySelectorAll(".room").forEach(function(el) { el.classList.remove("room--active"); }); // noqa: secret
 
-  var working = 0, done = 0, errors = 0, total = 0;
+  // `working` counts running instances (parallel same-type agents included);
+  // `workingEntries` counts badges, for the idle-agents math.
+  var working = 0, workingEntries = 0, done = 0, errors = 0, total = 0;
   var idleByRoom = {};
   var entries = Object.entries(currentAgents);
 
   for (var i = 0; i < entries.length; i++) {
     var name = entries[i][0], agent = entries[i][1];
     total++;
-    if (agent.state === "working") working++;
+    if (agent.state === "working") {
+      workingEntries++;
+      working += agent.activeCount > 1 ? agent.activeCount : 1;
+    }
     if (agent.state === "done") done++;
     if (agent.state === "error") errors++;
 
@@ -137,13 +143,16 @@ function render() {
     var el = document.createElement("div");
     el.className = "agent agent--" + agent.state;
 
-    var tips = '<div class="tooltip-name">' + name + "</div>";
+    var instances = agent.state === "working" && agent.activeCount > 1 ? agent.activeCount : 0;
+
+    var tips = '<div class="tooltip-name">' + name + (instances ? " ×" + instances : "") + "</div>";
     if (agent.task) tips += '<div class="tooltip-task">' + agent.task + "</div>";
     if (agent.lastActivity) tips += '<div class="tooltip-time">' + formatTime(agent.lastActivity) + "</div>";
 
     el.innerHTML =
       '<span class="agent-icon">' + getAgentIcon(name, agent.room) + "</span>" +
       '<span class="agent-name">' + shortName(name) + "</span>" +
+      (instances ? '<span class="agent-instances">×' + instances + "</span>" : "") +
       '<div class="agent-tooltip">' + tips + "</div>";
     roomEl.appendChild(el);
   }
@@ -159,7 +168,7 @@ function render() {
     roomEl.appendChild(chip);
   });
 
-  updateIdleToggle(total - working - done - errors);
+  updateIdleToggle(total - workingEntries - done - errors);
 
   setText("stat-working", working);
   setText("stat-done", done);
@@ -169,18 +178,32 @@ function render() {
 
   var dot = document.querySelector(".status-dot");
   var statusText = document.getElementById("status-text");
-  if (working > 0) {
-    if (dot) { dot.classList.remove("status-dot--off"); dot.classList.add("status-dot--on"); }
-    if (statusText) statusText.textContent = working + " active";
-  } else if (total > 0) {
-    if (dot) { dot.classList.remove("status-dot--on"); dot.classList.add("status-dot--off"); }
-    if (statusText) statusText.textContent = "idle";
-  } else {
-    if (dot) { dot.classList.remove("status-dot--on"); dot.classList.add("status-dot--off"); }
-    if (statusText) statusText.textContent = "offline";
+  function setStatus(cls, text) {
+    if (dot) {
+      dot.classList.remove("status-dot--on", "status-dot--off", "status-dot--wait");
+      dot.classList.add(cls);
+    }
+    if (statusText) statusText.textContent = text;
   }
+  if (currentWaiting) setStatus("status-dot--wait", "waiting for you");
+  else if (working > 0) setStatus("status-dot--on", working + " active");
+  else if (total > 0) setStatus("status-dot--off", "idle");
+  else setStatus("status-dot--off", "offline");
 
+  renderWaiting();
   renderTimeline();
+}
+
+function renderWaiting() {
+  var banner = document.getElementById("waiting-banner");
+  var msgEl = document.getElementById("waiting-msg");
+  if (!banner) return;
+  if (currentWaiting) {
+    if (msgEl) msgEl.textContent = currentWaiting.message || "";
+    banner.hidden = false;
+  } else {
+    banner.hidden = true;
+  }
 }
 
 function renderTimeline() {
@@ -273,12 +296,14 @@ function addLogEntry(agent, event, task, room) {
 
   var isStart = event === "agent_start";
   var isError = event === "agent_stop" && task === "ERROR";
+  var isMain = agent === "Claude (main)";
   var cls = isStart ? "start" : isError ? "error" : "stop";
   var arrow = isStart ? "▶" : isError ? "✖" : "✔";
   var label = task && task !== "ERROR" ? shortName(agent) + ": " + task : shortName(agent);
   var time = new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
-  if (!isStart && !isError) completedCount++;
+  // Main-model turns still land on the timeline, but "completed" counts agents only.
+  if (!isStart && !isError && !isMain) completedCount++;
 
   var r = room || agentRoomCache[agent] || "lobby";
   agentRoomCache[agent] = r;
@@ -289,6 +314,18 @@ function addLogEntry(agent, event, task, room) {
   entry.textContent = time + "  " + arrow + "  " + label;
   log.appendChild(entry);
 
+  while (log.children.length > 50) log.removeChild(log.firstChild);
+  log.scrollTop = log.scrollHeight;
+}
+
+function addWaitingLogEntry(message) {
+  var log = document.getElementById("event-log");
+  if (!log) return;
+  var time = new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  var entry = document.createElement("div");
+  entry.className = "event-log-entry event-log-entry--wait";
+  entry.textContent = time + "  ✋  " + (message || "waiting for you");
+  log.appendChild(entry);
   while (log.children.length > 50) log.removeChild(log.firstChild);
   log.scrollTop = log.scrollHeight;
 }
@@ -313,9 +350,14 @@ window.addEventListener("message", function(evt) { // noqa: secret
     }
     currentAgents = msg.agents;
     if (typeof msg.model !== "undefined") setModel(msg.model);
+    if (typeof msg.waiting !== "undefined") {
+      if (msg.waiting && !currentWaiting) addWaitingLogEntry(msg.waiting.message);
+      currentWaiting = msg.waiting || null;
+    }
     render();
   } else if (msg.type === "usage_update") {
     lastUsage = msg.data;
+    recordUsageSamples(msg.data && msg.data.subscription);
     renderUsage();
   } else if (msg.type === "usage_error") {
     renderUsageError(msg.source, msg.message);
@@ -422,6 +464,76 @@ function resetText(resetsAt) {
   return "resets in " + formatDuration(mins);
 }
 
+// ── Usage burn-rate forecast ──
+// Keeps a rolling window of utilization samples per limit kind and projects
+// when the limit hits 100% at the current pace. Persisted in localStorage so
+// webview reloads don't lose the trend.
+var USAGE_HISTORY_KEY = "claudeOffice.usageHistory";
+var USAGE_HISTORY_WINDOW_MS = 90 * 60000;
+var USAGE_FORECAST_MIN_SPAN_MS = 10 * 60000;
+var usageHistory = {}; // kind -> [{t, pct}]
+try {
+  var savedHist = localStorage.getItem(USAGE_HISTORY_KEY);
+  if (savedHist) usageHistory = JSON.parse(savedHist) || {};
+} catch(e) { usageHistory = {}; }
+
+function recordUsageSamples(sub) {
+  if (!sub || !sub.limits) return;
+  var t = Date.parse(sub.fetchedAt || "");
+  if (isNaN(t)) return;
+  var changed = false;
+  for (var i = 0; i < sub.limits.length; i++) {
+    var lim = sub.limits[i];
+    var arr = usageHistory[lim.kind] || (usageHistory[lim.kind] = []);
+    var last = arr[arr.length - 1];
+    if (last && last.t >= t) continue; // same snapshot re-broadcast
+    // A big utilization drop means the window reset — old trend is meaningless.
+    if (last && lim.utilization < last.pct - 5) arr.length = 0;
+    arr.push({ t: t, pct: lim.utilization });
+    while (arr.length > 0 && t - arr[0].t > USAGE_HISTORY_WINDOW_MS) arr.shift();
+    changed = true;
+  }
+  if (changed) {
+    try { localStorage.setItem(USAGE_HISTORY_KEY, JSON.stringify(usageHistory)); } catch(e) {}
+  }
+}
+
+/** Projected epoch-ms when this limit hits 100%, or null if not burning. */
+function forecastLimit(lim) {
+  var arr = usageHistory[lim.kind];
+  if (!arr || arr.length < 2) return null;
+  var first = arr[0], last = arr[arr.length - 1];
+  var span = last.t - first.t;
+  if (span < USAGE_FORECAST_MIN_SPAN_MS) return null;
+  var rate = (last.pct - first.pct) / span;
+  if (rate <= 0 || last.pct >= 100) return null;
+  return last.t + (100 - last.pct) / rate;
+}
+
+function renderForecast(sub) {
+  var el = document.getElementById("usage-forecast");
+  if (!el) return;
+  var worst = null;
+  if (sub && sub.limits) {
+    for (var i = 0; i < sub.limits.length; i++) {
+      var lim = sub.limits[i];
+      var hitAt = forecastLimit(lim);
+      if (hitAt == null) continue;
+      var resetAt = lim.resetsAt ? Date.parse(lim.resetsAt) : NaN;
+      if (!isNaN(resetAt) && hitAt >= resetAt) continue; // window resets first — safe
+      if (!worst || hitAt < worst.hitAt) worst = { label: lim.label, hitAt: hitAt };
+    }
+  }
+  var mins = worst ? (worst.hitAt - Date.now()) / 60000 : 0;
+  if (!worst || mins <= 0) {
+    el.hidden = true;
+    return;
+  }
+  el.textContent = "⚠ " + worst.label + " hits 100% in ~" + formatDuration(mins) + " at the current pace";
+  el.classList.toggle("usage-forecast--crit", mins < 60);
+  el.hidden = false;
+}
+
 function renderUsage() {
   if (!lastUsage) return;
   var sub = lastUsage.subscription;
@@ -453,6 +565,7 @@ function renderUsage() {
     }
     if (upd) upd.textContent = "updated " + formatTime(sub.fetchedAt);
   }
+  renderForecast(sub);
 
   if (cost) {
     if (costSection instanceof HTMLElement) costSection.hidden = false;

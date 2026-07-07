@@ -21,6 +21,14 @@
       </div>
     </div>
 
+    <div class="waiting-banner" id="waiting-banner" hidden>
+      <span class="waiting-hand">&#9995;</span>
+      <div class="waiting-text">
+        <div class="waiting-title">Claude is waiting for you</div>
+        <div class="waiting-msg" id="waiting-msg"></div>
+      </div>
+    </div>
+
     <div class="floor">
       <div class="room" data-room="directors">
         <div class="room-header">
@@ -139,6 +147,7 @@
       </div>
       <!-- Subscription limit bars are built dynamically from the API response. -->
       <div class="usage-group" id="usage-subscription" hidden></div>
+      <div class="usage-forecast" id="usage-forecast" hidden></div>
       <div class="usage-group" id="usage-cost" hidden>
         <div class="usage-bar" data-kind="block">
           <div class="usage-bar-label">5-hour block ($)</div>

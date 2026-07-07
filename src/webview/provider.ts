@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { AgentState } from '../types';
+import { AgentState, SessionWaiting } from '../types';
 
 interface WebviewSlot {
   webview: vscode.Webview;
@@ -17,6 +17,7 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
   private panel: vscode.WebviewPanel | null = null;
   private lastState: Record<string, AgentState> | null = null;
   private lastModel: string | null = null;
+  private lastWaiting: SessionWaiting | null = null;
   private lastSubscription: unknown = null;
   private lastCost: unknown = null;
   private usageErrors: { subscription: string | null; cost: string | null } = {
@@ -76,10 +77,15 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  updateAgents(agents: Record<string, AgentState>, model: string | null = null): void {
+  updateAgents(
+    agents: Record<string, AgentState>,
+    model: string | null = null,
+    waiting: SessionWaiting | null = null,
+  ): void {
     this.lastState = agents;
     this.lastModel = model;
-    this.broadcast({ type: 'full_state', agents, model });
+    this.lastWaiting = waiting;
+    this.broadcast({ type: 'full_state', agents, model, waiting });
   }
 
   updateSubscription(data: unknown): void {
@@ -128,7 +134,12 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
       if (msg.type !== 'webview_ready') return;
       slot.ready = true;
       if (this.lastState) {
-        webview.postMessage({ type: 'full_state', agents: this.lastState, model: this.lastModel });
+        webview.postMessage({
+          type: 'full_state',
+          agents: this.lastState,
+          model: this.lastModel,
+          waiting: this.lastWaiting,
+        });
       }
       if (this.lastSubscription !== null || this.lastCost !== null) {
         webview.postMessage({

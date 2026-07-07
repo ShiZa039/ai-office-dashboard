@@ -98,9 +98,57 @@ export function activate(context: vscode.ExtensionContext) {
   const eventsFile = configPath || path.join(os.homedir(), '.claude', 'agent-events.jsonl');
   log.appendLine(`Claude Office: watching ${eventsFile}`);
 
+  const statusBarItem = vscode.window.createStatusBarItem(
+    'claudeOffice.status',
+    vscode.StatusBarAlignment.Left,
+    -50,
+  );
+  statusBarItem.name = 'Claude Office';
+  statusBarItem.command = 'claudeOffice.showDashboard';
+
+  const statusBarEnabled = () =>
+    vscode.workspace.getConfiguration('claudeOffice').get<boolean>('statusBar.enabled', true);
+
+  const updateStatusBar = () => {
+    if (!store || !statusBarEnabled()) {
+      statusBarItem.hide();
+      return;
+    }
+    const snapshot = store.getSnapshot();
+    const waiting = store.getWaiting();
+    let working = 0;
+    let errors = 0;
+    const total = Object.keys(snapshot).length;
+    for (const agent of Object.values(snapshot)) {
+      if (agent.state === 'working') working += agent.activeCount ?? 1;
+      if (agent.state === 'error') errors++;
+    }
+
+    statusBarItem.backgroundColor = undefined;
+    if (waiting) {
+      statusBarItem.text = '✋ Claude';
+      statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+      statusBarItem.tooltip = `Claude is waiting for you${waiting.message ? `: ${waiting.message}` : ''}`;
+    } else if (errors > 0) {
+      statusBarItem.text = `$(error) ${errors} agent${errors > 1 ? 's' : ''}`;
+      statusBarItem.tooltip = `Claude Office: ${errors} agent(s) finished with errors`;
+    } else if (working > 0) {
+      statusBarItem.text = `$(pulse) ${working} working`;
+      statusBarItem.tooltip = `Claude Office: ${working} agent(s) working`;
+    } else if (total > 0) {
+      statusBarItem.text = '$(home) idle';
+      statusBarItem.tooltip = `Claude Office: ${total} agents, all idle`;
+    } else {
+      statusBarItem.hide();
+      return;
+    }
+    statusBarItem.show();
+  };
+
   const broadcastState = () => {
     if (!store) return;
-    provider.updateAgents(store.getSnapshot(), store.getModel());
+    provider.updateAgents(store.getSnapshot(), store.getModel(), store.getWaiting());
+    updateStatusBar();
   };
 
   store.onChange = broadcastState;
@@ -198,12 +246,15 @@ export function activate(context: vscode.ExtensionContext) {
       store.setCwdFilter(currentCwdFilter());
       store.clear();
       seedRoster(store);
-      provider.updateAgents(store.getSnapshot(), store.getModel());
+      broadcastState();
     }
     if (e.affectsConfiguration('claudeOffice.roster') && store) {
       store.clear();
       seedRoster(store);
-      provider.updateAgents(store.getSnapshot(), store.getModel());
+      broadcastState();
+    }
+    if (e.affectsConfiguration('claudeOffice.statusBar')) {
+      updateStatusBar();
     }
     if (!e.affectsConfiguration('claudeOffice.usage')) return;
 
@@ -225,11 +276,12 @@ export function activate(context: vscode.ExtensionContext) {
     store.setCwdFilter(currentCwdFilter());
     store.clear();
     seedRoster(store);
-    provider.updateAgents(store.getSnapshot(), store.getModel());
+    broadcastState();
   });
 
   context.subscriptions.push(
     viewRegistration, showCmd, openInEditorCmd, installHooksCmd, clearCmd, cfgChange, foldersChange,
+    statusBarItem,
   );
 }
 

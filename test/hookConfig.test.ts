@@ -3,6 +3,7 @@ import {
   buildHookCommand,
   hasOfficeHooks,
   mergeOfficeHooks,
+  officeHookCoverage,
   HOOK_EVENTS,
 } from '../src/hookConfig';
 
@@ -98,5 +99,40 @@ assert.strictEqual(
   false,
   'partial registration is not ok',
 );
+
+// --- officeHookCoverage: none / partial / full ---
+
+assert.strictEqual(officeHookCoverage(null), 'none', 'null settings → none');
+assert.strictEqual(officeHookCoverage({}), 'none', 'no hooks key → none');
+assert.strictEqual(
+  officeHookCoverage({ hooks: { PreToolUse: [{ hooks: [{ command: 'foreign.sh' }] }] } }),
+  'none',
+  'only foreign hooks → none',
+);
+assert.strictEqual(
+  officeHookCoverage({
+    hooks: { SubagentStart: [{ hooks: [{ command: 'x emit-agent-event.py y' }] }] },
+  }),
+  'partial',
+  'old install missing new events → partial',
+);
+assert.strictEqual(
+  officeHookCoverage(mergeOfficeHooks({}, 'node').settings),
+  'full',
+  'fresh merge → full',
+);
+
+// v0.9-era install (without Notification/UserPromptSubmit) must read as partial,
+// so activation upgrades it silently instead of nagging like a fresh install.
+{
+  const v9 = mergeOfficeHooks({}, 'python').settings;
+  const hooks = v9.hooks as Record<string, unknown>;
+  delete hooks.Notification;
+  delete hooks.UserPromptSubmit;
+  assert.strictEqual(officeHookCoverage(v9), 'partial', 'v0.9 install → partial');
+  const upgraded = mergeOfficeHooks(v9, 'python');
+  assert.strictEqual(upgraded.changed, true, 'upgrade merge adds new events');
+  assert.strictEqual(officeHookCoverage(upgraded.settings), 'full', 'upgrade → full');
+}
 
 console.log('All hookConfig tests passed.');

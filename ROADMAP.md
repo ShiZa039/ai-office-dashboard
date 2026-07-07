@@ -1,6 +1,6 @@
 # Roadmap — Claude Office Dashboard
 
-История релизов и план развития. Текущая версия — `v0.7.0`.
+История релизов и план развития. Текущая версия — `v0.10.0`.
 
 ---
 
@@ -59,7 +59,7 @@
 - Эвристика `inferRoomByName` по токенам (director/ai/llm/security/auth/docker/ci/qa/test/react/ui/webhook/telegram/backend/django/…)
 - `AgentStateStore.setRoomResolver()` + `onDidChangeConfiguration` — live-обновление маппинга
 
-### v0.7.0 (commit `b172707`) — текущий релиз
+### v0.7.0 (commit `b172707`)
 - Multi-window isolation: хук пишет `cwd` в событие
 - `AgentStateStore.setCwdFilter()` scopes store к workspace folder
 - Нормализация path (backslash→slash, lowercase, strip trailing `/`), `startsWith` для подпапок
@@ -68,11 +68,38 @@
 - Тесты: `test/agentState.test.ts` с 7 сценариями
 - Документация: [INSTALL.md](INSTALL.md) с troubleshooting
 
+### v0.9.0 (commit `18ee849`) — universal zero-config rewrite
+- Авто-установка/ремонт хуков из расширения (`hookInstaller` + чистая логика в `hookConfig`),
+  runtime-детект python→python3→py→node, merge в `~/.claude/settings.json` с бэкапом
+- Roster discovery: агенты из `.claude/agents/**/*.md` сидируются idle при активации
+- Реальные лимиты подписки через `api.anthropic.com/api/oauth/usage` (логин Claude Code),
+  ccusage-бары переведены в opt-in (`usage.costSource`)
+- Node-вариант хука (`emit-agent-event.js`) для машин без Python
+- Убраны все проектные дефолты — расширение ставится в любой проект без настройки
+
+### v0.10.0 — «Claude ждёт тебя» + статус-бар + прогноз лимитов
+- Хуки `Notification`/`UserPromptSubmit` → события `agent_waiting`/`user_prompt`
+- Баннер ✋ «Claude is waiting for you» + жёлтая статус-точка + запись в лог
+- Тихий апгрейд хуков при обновлении расширения (`officeHookCoverage`: partial → merge без промпта)
+- Статус-бар айтем: ✋ waiting (warning bg) / ⚠ errors / N working / idle; настройка `statusBar.enabled`
+- Прогноз исчерпания лимитов: история utilization в webview, «hits 100% in ~2h at the current pace»
+  (только если лимит кончится раньше своего резета)
+- Фигурка главной модели «Claude (main)» в Directors: работает между `user_prompt` и `Stop`,
+  ×N при нескольких сессиях в проекте, тултип с моделью — видно, когда оркестратор пашет сам
+  вместо делегирования (ходы главной модели не считаются в completed)
+- Фикс: параллельные агенты одного типа больше не схлопываются — счётчик инстансов
+  (`activeCount`, бейдж ×N), состояние working держится, пока не завершатся все
+- Фикс: `EventWatcher` больше не теряет недописанную строку при конкурентной записи хуков
+  (буфер хвоста до `\n`)
+- Фикс: конец хода главного агента (`Stop` → session_stop) больше не сбрасывает работающих
+  фоновых сабагентов — он лишь прибирает done/error-бейджи; осиротевшие working-агенты
+  убираются периодическим sweep (таймаут поднят 10 → 20 мин, чтобы не резать долгих агентов)
+
 ---
 
 ## В планах
 
-### Ближайшее (v0.8.x)
+### Полировка перед публикацией
 
 - [ ] **Лицензия и LICENSE-файл** — выбрать MIT / Apache 2.0, добавить файл, обновить `package.json`.
 - [ ] **README badges** — VS Code Marketplace, install count, version, license.
@@ -80,7 +107,7 @@
 - [ ] **Иконка расширения** для Marketplace (128×128 PNG, не SVG).
 - [ ] **CHANGELOG.md** — извлечь из git log, поддерживать вручную.
 
-### v0.9.x — Marketplace
+### Marketplace
 
 - [ ] Регистрация `publisher` на marketplace.visualstudio.com.
 - [ ] `vsce publish` pipeline — GitHub Action на тег `v*`.
@@ -97,6 +124,8 @@
 ### Идеи на потом
 
 - [ ] **Drill-down по агенту** — клик на фигурку → панель с историей этого агента + текущей задачей.
+- [ ] **Иерархия агентов** — кто кого заспавнил (оркестратор + сабагенты), если хуки дадут parent id.
+- [ ] **Replay дня** — ползунок перемотки офиса по JSONL-логу.
 - [ ] **Метрики агентов** — среднее время работы, success/error rate, топ занятых комнат.
 - [ ] **Webview-панель «debug»** — сырые JSONL-события с подсветкой синтаксиса.
 - [ ] **Экспорт сессии** в Markdown/HTML — отчёт о работе агентов за период.

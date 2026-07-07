@@ -1,9 +1,18 @@
-import { AgentEvent, AgentState, getRoomForAgent } from './types';
+import {
+  AgentEvent,
+  AgentState,
+  MAIN_AGENT_NAME,
+  SessionWaiting,
+  getRoomForAgent,
+} from './types';
 
 type RoomResolver = (agentName: string) => string;
 
 const DONE_TIMEOUT_MS = 5000;
-const STALE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+// Long enough that a legitimately long-running agent isn't swept mid-flight
+// (session_stop no longer terminates working agents — the sweep is the only
+// cleanup for orphans), short enough that stale figures don't linger forever.
+const STALE_TIMEOUT_MS = 20 * 60 * 1000; // 20 minutes
 const SWEEP_INTERVAL_MS = 30 * 1000;     // sweep every 30s
 
 /**
@@ -26,6 +35,9 @@ export class AgentStateStore {
   private roomResolver: RoomResolver = (name) => getRoomForAgent(name);
   private cwdFilters: string[] | null = null;
   private currentModel: string | null = null;
+  private waiting: SessionWaiting | null = null;
+  /** Session ids whose main turn is currently running (user_prompt → Stop). */
+  private mainSessions: Set<string> = new Set();
 
   /** Provide a custom agent→room resolver (e.g. merged user config). */
   setRoomResolver(resolver: RoomResolver): void {
@@ -107,8 +119,37 @@ export class AgentStateStore {
       }
     }
 
+    // Waiting is session-level: a Notification raises it, any other activity
+    // (user answered, agents resumed, session ended) clears it. Historical
+    // notifications replayed on startup never resurrect the banner.
+    if (event.event === 'agent_waiting') {
+      if (!this.isStale(event.ts)) {
+        this.waiting = { message: event.task ?? '', since: event.ts };
+      }
+      return;
+    }
+    this.waiting = null;
+
     switch (event.event) {
+      case 'user_prompt': {
+        // The user submitted a prompt — the main model starts its turn.
+        if (this.isStale(event.ts)) break;
+        if (event.session) this.mainSessions.add(event.session);
+        this.clearDoneTimer(MAIN_AGENT_NAME);
+        this.agents.set(MAIN_AGENT_NAME, {
+          name: MAIN_AGENT_NAME,
+          state: 'working',
+          task: this.currentModel ?? undefined,
+          room: this.roomResolver(MAIN_AGENT_NAME),
+          lastActivity: event.ts,
+          cwd: event.cwd,
+          activeCount: Math.max(1, this.mainSessions.size),
+        });
+        break;
+      }
+
       case 'agent_start': {
+        this.touchMain(event);
         // Guard: if this start is older than STALE_TIMEOUT, don't resurrect working state.
         if (this.isStale(event.ts)) {
           if (!this.agents.has(event.agent)) {
@@ -123,6 +164,11 @@ export class AgentStateStore {
           break;
         }
         this.clearDoneTimer(event.agent);
+        // Parallel same-type agents share one entry (events carry no instance
+        // id) — count instances so one finishing doesn't hide the rest.
+        const existing = this.agents.get(event.agent);
+        const activeCount =
+          existing?.state === 'working' ? (existing.activeCount ?? 1) + 1 : 1;
         this.agents.set(event.agent, {
           name: event.agent,
           state: 'working',
@@ -130,11 +176,25 @@ export class AgentStateStore {
           room: this.roomResolver(event.agent),
           lastActivity: event.ts,
           cwd: event.cwd,
+          activeCount,
         });
         break;
       }
 
       case 'agent_stop': {
+        this.touchMain(event);
+        const existing = this.agents.get(event.agent);
+        const remaining =
+          existing?.state === 'working' ? (existing.activeCount ?? 1) - 1 : 0;
+        if (existing && remaining > 0) {
+          // Other instances of this agent type are still running.
+          this.agents.set(event.agent, {
+            ...existing,
+            activeCount: remaining,
+            lastActivity: event.ts,
+          });
+          break;
+        }
         const state = event.result === 'error' ? 'error' : 'done';
         this.agents.set(event.agent, {
           name: event.agent,
@@ -148,14 +208,36 @@ export class AgentStateStore {
         break;
       }
 
-      case 'session_stop':
-        // Reset all agents in this (cwd-scoped) store to idle.
+      case 'session_stop': {
+        // The `Stop` hook fires when the MAIN turn ends — background subagents
+        // may well still be running (their own agent_stop arrives later), so
+        // never kill working agents here. Only tidy finished badges; orphaned
+        // "working" agents (killed session, lost stop event) are reclaimed by
+        // the periodic stale sweep.
         for (const [name, agent] of this.agents) {
-          this.clearDoneTimer(name);
-          agent.state = 'idle';
-          agent.task = undefined;
+          if (agent.state === 'done' || agent.state === 'error') {
+            this.clearDoneTimer(name);
+            agent.state = 'idle';
+            agent.task = undefined;
+            agent.activeCount = undefined;
+          }
+        }
+        // The main model finished this session's turn.
+        if (event.session) this.mainSessions.delete(event.session);
+        const main = this.agents.get(MAIN_AGENT_NAME);
+        if (main && main.state === 'working') {
+          main.lastActivity = event.ts;
+          if (this.mainSessions.size > 0) {
+            main.activeCount = this.mainSessions.size;
+          } else {
+            main.state = 'done';
+            main.task = undefined;
+            main.activeCount = undefined;
+            this.scheduleDoneTimer(MAIN_AGENT_NAME);
+          }
         }
         break;
+      }
     }
   }
 
@@ -176,6 +258,11 @@ export class AgentStateStore {
     return this.currentModel;
   }
 
+  /** Set while Claude waits for the user (permission / input), null otherwise. */
+  getWaiting(): SessionWaiting | null {
+    return this.waiting;
+  }
+
   clear(): void {
     for (const timer of this.doneTimers.values()) {
       clearTimeout(timer);
@@ -184,6 +271,22 @@ export class AgentStateStore {
     this.agents.clear();
     this.recentEvents = [];
     this.currentModel = null;
+    this.waiting = null;
+    this.mainSessions.clear();
+  }
+
+  /**
+   * Agent traffic proves the session's main turn is still alive — refresh the
+   * main figure's activity so a long orchestration isn't swept mid-flight.
+   * A stop from an already-finished turn (background agent outliving the
+   * turn) is a no-op because the session is no longer in mainSessions.
+   */
+  private touchMain(event: AgentEvent): void {
+    if (!event.session || !this.mainSessions.has(event.session)) return;
+    const main = this.agents.get(MAIN_AGENT_NAME);
+    if (main && main.state === 'working') {
+      main.lastActivity = event.ts;
+    }
   }
 
   private isStale(ts: string): boolean {
@@ -195,6 +298,12 @@ export class AgentStateStore {
   private sweepStale(): void {
     let changed = false;
     const now = Date.now();
+    // A waiting banner nobody acted on for 10 min is noise, not a signal —
+    // the user likely answered in the terminal without triggering our hooks.
+    if (this.waiting && this.isStale(this.waiting.since)) {
+      this.waiting = null;
+      changed = true;
+    }
     for (const [name, agent] of this.agents) {
       if (agent.state !== 'working' || !agent.lastActivity) continue;
       const t = Date.parse(agent.lastActivity);
@@ -202,6 +311,8 @@ export class AgentStateStore {
         this.clearDoneTimer(name);
         agent.state = 'idle';
         agent.task = undefined;
+        agent.activeCount = undefined;
+        if (name === MAIN_AGENT_NAME) this.mainSessions.clear();
         changed = true;
       }
     }

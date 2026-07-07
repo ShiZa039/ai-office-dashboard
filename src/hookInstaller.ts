@@ -7,6 +7,7 @@ import {
   HookRuntime,
   hasOfficeHooks,
   mergeOfficeHooks,
+  officeHookCoverage,
 } from './hookConfig';
 
 const PROMPT_DISMISSED_KEY = 'claudeOffice.hooksPromptDismissed';
@@ -47,7 +48,7 @@ export function detectRuntime(): HookRuntime | null {
 }
 
 export interface HookStatus {
-  /** All three hook events registered in ~/.claude/settings.json. */
+  /** Every hook event from HOOK_EVENTS registered in ~/.claude/settings.json. */
   settingsOk: boolean;
   /** Bundled hook scripts are present and current in ~/.claude/hooks/. */
   scriptsOk: boolean;
@@ -174,6 +175,17 @@ export async function ensureHooksOnActivation(
       log.appendLine('[hooks] refreshed hook scripts to bundled version');
     } catch (err) {
       log.appendLine(`[hooks] failed to refresh scripts: ${String(err)}`);
+    }
+    return;
+  }
+
+  // Partial registration = older extension version already installed our
+  // hooks (consent given); merge the newly added events in silently.
+  const settings = readUserSettings();
+  if (settings !== null && officeHookCoverage(settings) === 'partial') {
+    const result = installHooks(log, bundledHooksDir);
+    if (result === 'installed') {
+      log.appendLine('[hooks] upgraded registrations to the current hook set');
     }
     return;
   }
