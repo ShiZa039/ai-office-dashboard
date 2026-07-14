@@ -2,7 +2,7 @@
   "name": "claude-office-dashboard",
   "displayName": "Claude Office Dashboard",
   "description": "Universal real-time agent dashboard for Claude Code: auto-setup hooks, per-project agent view, real subscription plan limits",
-  "version": "0.10.1",
+  "version": "0.12.0",
   "publisher": "shiza039",
   "license": "MIT",
   "repository": {
@@ -12,8 +12,12 @@
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": ["Visualization"],
-  "activationEvents": ["onStartupFinished"],
+  "categories": [
+    "Visualization"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./out/src/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -46,6 +50,11 @@
         "icon": "$(link-external)"
       },
       {
+        "command": "claudeOffice.emergencyStop",
+        "title": "Claude Office: Emergency Stop / Resume Agents",
+        "icon": "$(stop-circle)"
+      },
+      {
         "command": "claudeOffice.clearEvents",
         "title": "Claude Office: Clear Events"
       },
@@ -56,6 +65,11 @@
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "claudeOffice.emergencyStop",
+          "when": "view == claudeOffice.dashboard",
+          "group": "navigation@0"
+        },
         {
           "command": "claudeOffice.openInEditor",
           "when": "view == claudeOffice.dashboard",
@@ -68,7 +82,12 @@
       "properties": {
         "claudeOffice.language": {
           "type": "string",
-          "enum": ["system", "vscode", "en", "ru"],
+          "enum": [
+            "system",
+            "vscode",
+            "en",
+            "ru"
+          ],
           "default": "system",
           "enumDescriptions": [
             "Operating system language (default)",
@@ -111,7 +130,10 @@
         },
         "claudeOffice.usage.costSource": {
           "type": "string",
-          "enum": ["off", "ccusage"],
+          "enum": [
+            "off",
+            "ccusage"
+          ],
           "default": "off",
           "description": "Additional cost-estimate bars (USD). \"ccusage\" spawns `npx ccusage` periodically"
         },
@@ -132,14 +154,19 @@
         },
         "claudeOffice.scope": {
           "type": "string",
-          "enum": ["workspace", "global"],
+          "enum": [
+            "workspace",
+            "global"
+          ],
           "default": "workspace",
           "description": "workspace = this window only; global = all Claude Code sessions"
         },
         "claudeOffice.agentRooms": {
           "type": "object",
           "default": {},
-          "additionalProperties": { "type": "string" },
+          "additionalProperties": {
+            "type": "string"
+          },
           "markdownDescription": "Custom agent→room mapping. Merged **over** the built-in defaults. Example: `{\"my-custom-agent\": \"backend\", \"design-agent\": \"frontend\"}`.\n\nKnown rooms: `directors`, `backend`, `frontend`, `qa`, `security`, `devops`, `integrations`, `ai-lab`, `iot`, `lobby`.\n\nUnknown agents are resolved by a keyword heuristic (e.g. `*-director` → directors, `react-*` → frontend); unmatched agents fall back to `lobby`."
         }
       }
@@ -150,7 +177,7 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "lint": "eslint src --ext ts",
-    "test": "tsc -p ./ && node out/test/eventParser.test.js && node out/test/types.test.js && node out/test/agentState.test.js && node out/test/hookConfig.test.js && node out/test/subscriptionUsage.test.js && node out/test/agentRoster.test.js && node out/test/emitAgentEvent.test.js"
+    "test": "tsc -p ./ && node out/test/eventParser.test.js && node out/test/types.test.js && node out/test/agentState.test.js && node out/test/hookConfig.test.js && node out/test/subscriptionUsage.test.js && node out/test/agentRoster.test.js && node out/test/emitAgentEvent.test.js && node out/test/stopFlag.test.js"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

@@ -32,6 +32,13 @@ assert.ok(
   'SessionStart hook registered for model tracking',
 );
 
+// --- PreToolUse stop gate is registered (emergency stop) ---
+
+assert.ok(
+  HOOK_EVENTS.some((e) => e.hookEvent === 'PreToolUse' && e.arg === 'stop_gate'),
+  'PreToolUse stop_gate registered for the emergency stop',
+);
+
 // --- merge into empty settings ---
 
 const empty = mergeOfficeHooks({}, 'python');

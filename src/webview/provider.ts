@@ -19,6 +19,7 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
   private lastState: Record<string, AgentState> | null = null;
   private lastModel: string | null = null;
   private lastWaiting: SessionWaiting | null = null;
+  private lastStop: { active: boolean; since: string | null } = { active: false, since: null };
   private lastSubscription: unknown = null;
   private lastCost: unknown = null;
   private usageErrors: { subscription: string | null; cost: string | null } = {
@@ -30,6 +31,9 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
 
   /** Callback invoked when any webview signals it's ready */
   onReady?: () => void;
+
+  /** Callback invoked when the user hits the emergency-stop / resume button. */
+  onToggleStop?: () => void;
 
   resolveWebviewView(
     webviewView: vscode.WebviewView,
@@ -89,6 +93,12 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
     this.broadcast({ type: 'full_state', agents, model, waiting });
   }
 
+  /** Push the emergency-stop state to the dashboard (button + banner). */
+  updateStop(active: boolean, since: string | null = null): void {
+    this.lastStop = { active, since };
+    this.broadcast({ type: 'stop_state', active, since });
+  }
+
   updateSubscription(data: unknown): void {
     this.lastSubscription = data;
     this.usageErrors.subscription = null;
@@ -132,6 +142,10 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
     webview.html = this.getHtml(webview);
 
     webview.onDidReceiveMessage((msg) => {
+      if (msg.type === 'toggle_stop') {
+        this.onToggleStop?.();
+        return;
+      }
       if (msg.type !== 'webview_ready') return;
       slot.ready = true;
       if (this.lastState) {
@@ -142,6 +156,7 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
           waiting: this.lastWaiting,
         });
       }
+      webview.postMessage({ type: 'stop_state', ...this.lastStop });
       if (this.lastSubscription !== null || this.lastCost !== null) {
         webview.postMessage({
           type: 'usage_update',

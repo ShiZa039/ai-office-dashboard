@@ -144,6 +144,84 @@ body {
   color: var(--text-primary);
 }
 
+/* ── Emergency stop ── */
+.stop-btn {
+  font-size: 11px;
+  font-family: inherit;
+  line-height: 1;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid var(--room-border);
+  background: transparent;
+  cursor: pointer;
+  filter: grayscale(1) opacity(0.6);
+  transition: all 0.2s ease;
+}
+
+.stop-btn:hover {
+  border-color: var(--red);
+  filter: none;
+}
+
+.stop-btn--active {
+  border-color: var(--red);
+  background: var(--red-dim);
+  filter: none;
+  animation: pulse 1.2s ease infinite;
+}
+
+.stop-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid var(--red);
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  animation: agentAppear 0.3s ease;
+}
+
+.stop-banner-icon {
+  font-size: 16px;
+  line-height: 1;
+  animation: pulse 1.2s ease infinite;
+}
+
+.stop-banner-text { flex: 1; }
+
+.stop-banner-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--red);
+}
+
+.stop-banner-msg {
+  font-size: 9px;
+  color: var(--text-secondary);
+}
+
+.stop-resume {
+  font-size: 9px;
+  font-family: inherit;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 3px;
+  border: 1px solid var(--red);
+  background: transparent;
+  color: var(--red);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.stop-resume:hover {
+  background: var(--red);
+  color: #fff;
+}
+
 .office-model {
   font-size: 8px;
   font-weight: 700;
@@ -274,17 +352,22 @@ body {
   min-height: 36px;
 }
 
-/* ── Room accent colors ── */
-.room[data-room="directors"]    { --room-accent: var(--yellow); }
-.room[data-room="backend"]      { --room-accent: var(--blue); }
-.room[data-room="frontend"]     { --room-accent: var(--purple); }
-.room[data-room="qa"]           { --room-accent: var(--green); }
-.room[data-room="security"]     { --room-accent: var(--red); }
-.room[data-room="devops"]       { --room-accent: var(--orange); }
-.room[data-room="integrations"] { --room-accent: var(--cyan); }
-.room[data-room="ai-lab"]       { --room-accent: var(--pink); }
-.room[data-room="iot"]          { --room-accent: var(--lime); }
-.room[data-room="lobby"]        { --room-accent: var(--teal); }
+/* Room accent color is set inline by office.js (--room-accent) — rooms are
+   built dynamically from the project's agents, including custom room ids. */
+.room { --room-accent: var(--teal); }
+
+/* Placeholder shown while the project has no agents (and hence no rooms). */
+.floor-empty {
+  grid-column: 1 / -1;
+  padding: 14px 10px;
+  border: 1px dashed var(--room-border);
+  border-radius: 6px;
+  font-size: 10px;
+  text-align: center;
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+.floor-empty[hidden] { display: none; }
 
 .room.room--active {
   border-left-color: var(--room-accent);

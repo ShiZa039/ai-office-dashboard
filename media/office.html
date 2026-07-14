@@ -14,11 +14,21 @@
       <div class="office-logo">&#9670;</div>
       <h2 class="office-title">Claude Office</h2>
       <span class="office-model" id="office-model" hidden></span>
+      <button class="stop-btn" id="stop-btn" type="button" aria-label="Emergency stop">&#128721;</button>
       <button class="idle-toggle" id="idle-toggle" type="button">idle</button>
       <div class="office-status" id="office-status">
         <span class="status-dot status-dot--off"></span>
         <span id="status-text" data-i18n="statusOffline">offline</span>
       </div>
+    </div>
+
+    <div class="stop-banner" id="stop-banner" hidden>
+      <span class="stop-banner-icon">&#128721;</span>
+      <div class="stop-banner-text">
+        <div class="stop-banner-title" data-i18n="stopActive">Emergency stop is active</div>
+        <div class="stop-banner-msg" data-i18n="stopHint">All agent tool calls are blocked</div>
+      </div>
+      <button class="stop-resume" id="stop-resume" type="button" data-i18n="stopResume">Resume</button>
     </div>
 
     <div class="waiting-banner" id="waiting-banner" hidden>
@@ -29,77 +39,9 @@
       </div>
     </div>
 
-    <div class="floor">
-      <div class="room" data-room="directors">
-        <div class="room-header">
-          <span class="room-icon">&#9733;</span>
-          <span class="room-label">Directors</span>
-        </div>
-        <div class="agents"></div>
-      </div>
-      <div class="room" data-room="backend">
-        <div class="room-header">
-          <span class="room-icon">&#9881;</span>
-          <span class="room-label">Backend</span>
-        </div>
-        <div class="agents"></div>
-      </div>
-      <div class="room" data-room="frontend">
-        <div class="room-header">
-          <span class="room-icon">&#9635;</span>
-          <span class="room-label">Frontend</span>
-        </div>
-        <div class="agents"></div>
-      </div>
-      <div class="room" data-room="qa">
-        <div class="room-header">
-          <span class="room-icon">&#10003;</span>
-          <span class="room-label">QA Lab</span>
-        </div>
-        <div class="agents"></div>
-      </div>
-      <div class="room" data-room="security">
-        <div class="room-header">
-          <span class="room-icon">&#9737;</span>
-          <span class="room-label">Security</span>
-        </div>
-        <div class="agents"></div>
-      </div>
-      <div class="room" data-room="devops">
-        <div class="room-header">
-          <span class="room-icon">&#9654;</span>
-          <span class="room-label">DevOps</span>
-        </div>
-        <div class="agents"></div>
-      </div>
-      <div class="room" data-room="integrations">
-        <div class="room-header">
-          <span class="room-icon">&#8644;</span>
-          <span class="room-label">Integrations</span>
-        </div>
-        <div class="agents"></div>
-      </div>
-      <div class="room" data-room="ai-lab">
-        <div class="room-header">
-          <span class="room-icon">&#10038;</span>
-          <span class="room-label">AI Lab</span>
-        </div>
-        <div class="agents"></div>
-      </div>
-      <div class="room" data-room="iot">
-        <div class="room-header">
-          <span class="room-icon">&#9678;</span>
-          <span class="room-label">IoT</span>
-        </div>
-        <div class="agents"></div>
-      </div>
-      <div class="room room--lobby" data-room="lobby">
-        <div class="room-header">
-          <span class="room-icon">&#8962;</span>
-          <span class="room-label">Lobby</span>
-        </div>
-        <div class="agents"></div>
-      </div>
+    <!-- Rooms are built dynamically from the project's actual agents (office.js). -->
+    <div class="floor" id="floor">
+      <div class="floor-empty" id="floor-empty" data-i18n="floorEmpty">No agents in this project yet</div>
     </div>
 
     <div class="stats-bar">

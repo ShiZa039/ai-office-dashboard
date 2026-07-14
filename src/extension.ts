@@ -11,6 +11,14 @@ import { discoverProjectAgents } from './agentRoster';
 import { ensureHooksOnActivation, installHooks } from './hookInstaller';
 import { MAIN_AGENT_NAME, getRoomForAgent } from './types';
 import { isRussianUi } from './locale';
+import {
+  activateStopFlag,
+  clearStopFlag,
+  readStopFlag,
+  stopAppliesToWindow,
+  stopFlagPath,
+  writeStopFlag,
+} from './stopFlag';
 
 /**
  * Read a project-local agent→room map from `<folder>/.claude/office-rooms.json`
@@ -110,6 +118,49 @@ export function activate(context: vscode.ExtensionContext) {
   const statusBarEnabled = () =>
     vscode.workspace.getConfiguration('claudeOffice').get<boolean>('statusBar.enabled', true);
 
+  // ── Emergency stop ──
+  // The dashboard button (or the command) writes ~/.claude/office-stop.json;
+  // the PreToolUse stop_gate hook then denies every tool call in the covered
+  // cwds until the flag is cleared (button again, or the next user prompt).
+  let stopActive = false;
+  let stopSince: string | null = null;
+
+  const refreshStopState = () => {
+    const flag = readStopFlag();
+    stopActive = stopAppliesToWindow(flag, currentCwdFilter());
+    stopSince = stopActive && flag ? flag.since || null : null;
+    provider.updateStop(stopActive, stopSince);
+    updateStatusBar();
+  };
+
+  const toggleStop = () => {
+    const ru = isRussianUi();
+    try {
+      if (stopActive) {
+        clearStopFlag();
+        void vscode.window.showInformationMessage(
+          ru
+            ? 'Claude Office: экстренная остановка снята — агенты снова могут работать.'
+            : 'Claude Office: emergency stop released — agents may work again.',
+        );
+      } else {
+        const now = new Date().toISOString();
+        writeStopFlag(activateStopFlag(readStopFlag(), currentCwdFilter(), now));
+        void vscode.window.showWarningMessage(
+          ru
+            ? 'Claude Office: ЭКСТРЕННАЯ ОСТАНОВКА — все вызовы инструментов блокируются. Повторное нажатие или новый промпт снимает её.'
+            : 'Claude Office: EMERGENCY STOP — all tool calls are blocked. Press again (or send a new prompt) to resume.',
+        );
+      }
+    } catch (err) {
+      log.appendLine(`Claude Office: failed to toggle stop flag: ${String(err)}`);
+      void vscode.window.showErrorMessage(
+        `Claude Office: failed to toggle emergency stop: ${String(err)}`,
+      );
+    }
+    refreshStopState();
+  };
+
   const updateStatusBar = () => {
     if (!store || !statusBarEnabled()) {
       statusBarItem.hide();
@@ -134,6 +185,15 @@ export function activate(context: vscode.ExtensionContext) {
 
     const ru = isRussianUi();
     statusBarItem.backgroundColor = undefined;
+    if (stopActive) {
+      statusBarItem.text = '🛑 Claude';
+      statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+      statusBarItem.tooltip = ru
+        ? 'Claude Office: экстренная остановка — все вызовы инструментов блокируются'
+        : 'Claude Office: emergency stop — all tool calls are blocked';
+      statusBarItem.show();
+      return;
+    }
     if (waiting) {
       statusBarItem.text = '✋ Claude';
       statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
@@ -189,6 +249,15 @@ export function activate(context: vscode.ExtensionContext) {
   watcher.start();
 
   provider.onReady = broadcastState;
+  provider.onToggleStop = toggleStop;
+
+  // Pick up flag changes from other windows and the user_prompt auto-release
+  // in the hook script. watchFile polls, so it also survives file re-creation.
+  refreshStopState();
+  fs.watchFile(stopFlagPath(), { interval: 1500 }, refreshStopState);
+  context.subscriptions.push(
+    new vscode.Disposable(() => fs.unwatchFile(stopFlagPath(), refreshStopState)),
+  );
 
   // Zero-config: offer to install Claude Code hooks if they are missing.
   const bundledHooksDir = path.join(context.extensionUri.fsPath, 'hooks');
@@ -206,6 +275,10 @@ export function activate(context: vscode.ExtensionContext) {
 
   const openInEditorCmd = vscode.commands.registerCommand('claudeOffice.openInEditor', () => {
     provider.openInEditor();
+  });
+
+  const emergencyStopCmd = vscode.commands.registerCommand('claudeOffice.emergencyStop', () => {
+    toggleStop();
   });
 
   const installHooksCmd = vscode.commands.registerCommand('claudeOffice.installHooks', () => {
@@ -271,6 +344,7 @@ export function activate(context: vscode.ExtensionContext) {
       store.clear();
       seedRoster(store);
       broadcastState();
+      refreshStopState();
     }
     if (e.affectsConfiguration('claudeOffice.roster') && store) {
       store.clear();
@@ -311,11 +385,12 @@ export function activate(context: vscode.ExtensionContext) {
     store.clear();
     seedRoster(store);
     broadcastState();
+    refreshStopState();
   });
 
   context.subscriptions.push(
-    viewRegistration, showCmd, openInEditorCmd, installHooksCmd, clearCmd, cfgChange, foldersChange,
-    statusBarItem,
+    viewRegistration, showCmd, openInEditorCmd, emergencyStopCmd, installHooksCmd, clearCmd,
+    cfgChange, foldersChange, statusBarItem,
   );
 }
 

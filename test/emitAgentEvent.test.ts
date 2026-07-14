@@ -114,5 +114,68 @@ runHook('user_prompt', { session_id: 'S1', cwd: '/p', prompt: 'secret question' 
   assert.ok(!('agent' in e), 'no agent field for session-level event');
 }
 
+// ── Emergency stop (stop_gate + user_prompt release) ──
+
+const stopFlagFile = path.join(home, '.claude', 'office-stop.json');
+
+function runGate(payload: Record<string, unknown>): string {
+  const r = spawnSync(process.execPath, [script, 'stop_gate'], {
+    input: JSON.stringify(payload),
+    encoding: 'utf-8',
+    env: { ...process.env, USERPROFILE: home, HOME: home },
+  });
+  assert.strictEqual(r.status, 0, `stop_gate exited 0: ${r.stderr}`);
+  return r.stdout.trim();
+}
+
+// --- no flag file: gate allows silently and writes no event ---
+
+const eventsBefore = fs.readFileSync(eventsFile, 'utf-8');
+assert.strictEqual(runGate({ session_id: 'S1', cwd: '/p' }), '', 'no flag → no output');
+assert.strictEqual(fs.readFileSync(eventsFile, 'utf-8'), eventsBefore, 'gate never appends events');
+
+// --- active flag covering the cwd: gate denies the tool call ---
+
+fs.writeFileSync(
+  stopFlagFile,
+  JSON.stringify({ active: true, cwds: ['/p'], since: '2026-07-14T10:00:00Z' }),
+  'utf-8',
+);
+{
+  const out = runGate({ session_id: 'S1', cwd: path.join('/p', 'sub') });
+  const decision = JSON.parse(out);
+  assert.strictEqual(
+    decision.hookSpecificOutput.permissionDecision,
+    'deny',
+    'covered cwd (subdir) is denied',
+  );
+  assert.ok(decision.hookSpecificOutput.permissionDecisionReason.includes('EMERGENCY STOP'));
+}
+
+// --- active flag for another project: gate allows ---
+
+assert.strictEqual(runGate({ session_id: 'S1', cwd: '/other' }), '', 'uncovered cwd passes');
+
+// --- inactive flag: gate allows ---
+
+fs.writeFileSync(stopFlagFile, JSON.stringify({ active: false, cwds: [] }), 'utf-8');
+assert.strictEqual(runGate({ session_id: 'S1', cwd: '/p' }), '', 'inactive flag passes');
+
+// --- global flag (empty cwds) denies everywhere ---
+
+fs.writeFileSync(stopFlagFile, JSON.stringify({ active: true, cwds: [] }), 'utf-8');
+{
+  const decision = JSON.parse(runGate({ session_id: 'S1', cwd: '/anywhere' }));
+  assert.strictEqual(decision.hookSpecificOutput.permissionDecision, 'deny', 'global stop');
+}
+
+// --- user_prompt releases the covering flag (new prompt = resume) ---
+
+fs.writeFileSync(stopFlagFile, JSON.stringify({ active: true, cwds: ['/p'] }), 'utf-8');
+runHook('user_prompt', { session_id: 'S1', cwd: '/other' });
+assert.ok(fs.existsSync(stopFlagFile), 'prompt in another project keeps the flag');
+runHook('user_prompt', { session_id: 'S1', cwd: '/p' });
+assert.ok(!fs.existsSync(stopFlagFile), 'prompt in the stopped project releases the flag');
+
 fs.rmSync(home, { recursive: true, force: true });
 console.log('All emitAgentEvent tests passed.');

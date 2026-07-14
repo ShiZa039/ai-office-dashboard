@@ -56,9 +56,16 @@ export type WebviewMessage =
       waiting?: SessionWaiting | null;
     }
   | { type: 'usage_update'; data: { subscription: unknown; cost: unknown } }
-  | { type: 'usage_error'; source: 'subscription' | 'cost'; message: string };
+  | { type: 'usage_error'; source: 'subscription' | 'cost'; message: string }
+  /** Emergency-stop flag state for this window (dashboard button + banner). */
+  | { type: 'stop_state'; active: boolean; since: string | null };
 
-/** Known room ids — keep in sync with media/icons.js and office.html data-room attrs. */
+/**
+ * Curated room ids with icons/labels/colors in the webview (media/icons.js,
+ * office.js ROOM_META). The floor is built dynamically from the agents'
+ * actual rooms, so any other id (e.g. from `.claude/office-rooms.json`)
+ * also works — it gets a generated label, color and a generic icon.
+ */
 export const KNOWN_ROOMS = [
   'directors',
   'backend',
@@ -97,68 +104,101 @@ export const DEFAULT_AGENT_ROOMS: Record<string, string> = {
   'output-style-setup': 'frontend',
 };
 
-/** Keyword-based fallback for unknown agent names (ordered: most specific first). */
-const KEYWORD_RULES: Array<{ keywords: string[]; room: string }> = [
-  { room: 'directors', keywords: ['director'] },
-  { room: 'ai-lab', keywords: ['ai', 'llm', 'prompt', 'claude', 'anthropic'] },
+/**
+ * Keyword-based fallback for unknown agent names (ordered: most specific
+ * first — the first rule with any hit wins). A keyword matches a name token
+ * exactly, or as a prefix when the keyword is ≥5 chars, so `permission` also
+ * catches `permissions`, `deploy` catches `deployment`, `audit` catches
+ * `auditor`. `phrases` match the squashed name with separators stripped —
+ * for multi-word terms like `rate-limit` → `ratelimit`.
+ */
+const KEYWORD_RULES: Array<{ keywords: string[]; phrases?: string[]; room: string }> = [
+  { room: 'directors', keywords: ['director', 'architect', 'planner', 'chief'] },
   {
-    // IoT is its own domain (firmware, telemetry, MQTT, provisioning). Listed
-    // before backend/devops/integrations so its specific tokens win.
+    room: 'ai-lab',
+    keywords: ['ai', 'llm', 'ml', 'rag', 'embedding', 'prompt', 'claude', 'anthropic'],
+  },
+  {
+    // IoT is its own domain (firmware, telemetry, MQTT). Listed before
+    // backend/devops/integrations so its specific tokens win. Deliberately
+    // no generic tokens (device/android/provisioning) — they dragged
+    // unrelated agents in and spawned an IoT room in non-IoT projects.
     room: 'iot',
-    keywords: [
-      'iot', 'mqtt', 'esp32', 'esptool', 'firmware', 'ota', 'telemetry',
-      'sensor', 'device', 'provisioning', 'sticker', 'android',
-    ],
+    keywords: ['iot', 'mqtt', 'esp32', 'esptool', 'firmware', 'ota', 'telemetry', 'sensor'],
   },
   {
     room: 'security',
     keywords: [
-      'security', 'auth', 'secret', 'permission', 'threat', 'hardening',
-      'audit', 'auditor', 'compliance', 'dependency', 'tls', 'pki',
+      'security', 'auth', 'authentication', 'authorization', 'oauth', 'sso',
+      'secret', 'permission', 'threat', 'hardening', 'audit', 'compliance',
+      'dependency', 'tls', 'pki', 'injection', 'xss', 'csrf', 'crypto',
+      'encryption', 'vault', 'rbac', 'acl', 'vuln', 'vulnerability', 'owasp',
+      'pentest', 'gdpr', 'privacy', 'protection', '152fz', 'firewall',
     ],
   },
   {
     room: 'devops',
     keywords: [
       'devops', 'docker', 'nginx', 'ci', 'cd', 'backup', 'deploy', 'apm',
-      'observability', 'alerting', 'scalability', 'ratelimit', 'iac',
-      'incident', 'release', 'mcp',
+      'observability', 'alerting', 'scalability', 'iac', 'incident',
+      'release', 'mcp', 'logging', 'monitor', 'metrics', 'prometheus',
+      'grafana', 'kubernetes', 'k8s', 'helm', 'terraform', 'ansible',
+      'infra', 'pipeline', 'provisioning', 'performance', 'profiling', 'sre',
     ],
+    phrases: ['ratelimit', 'cicd'],
   },
   {
     room: 'qa',
     keywords: [
-      'qa', 'test', 'pytest', 'vitest', 'coverage', 'edge', 'reviewer',
-      'docs', 'annotations',
+      'qa', 'test', 'testing', 'pytest', 'vitest', 'coverage', 'edge',
+      'review', 'docs', 'annotations', 'lint', 'linter', 'e2e', 'regression',
+      'refactor', 'quality',
     ],
+    phrases: ['techdebt'],
   },
   {
     room: 'frontend',
     keywords: [
-      'frontend', 'react', 'ui', 'ux', 'accessibility', 'a11y', 'i18n',
-      'media', 'geo', 'maps', 'camera', 'scanner',
+      'frontend', 'react', 'vue', 'angular', 'svelte', 'css', 'html',
+      'tailwind', 'component', 'ui', 'ux', 'accessibility', 'a11y', 'i18n',
+      'media', 'geo', 'maps', 'camera', 'scanner', 'mobile', 'android',
+      'ios', 'layout', 'responsive',
     ],
   },
   {
     room: 'integrations',
-    keywords: ['integration', 'webhook', '1c', 'telegram', 'email', 'payment', 'edo', 'ofd', 'notifications'],
+    keywords: [
+      'integration', 'webhook', 'gateway', '1c', 'telegram', 'email', 'smtp',
+      'sms', 'payment', 'edo', 'ofd', 'notifications',
+    ],
   },
   {
     room: 'backend',
     keywords: [
-      'backend', 'django', 'orm', 'database', 'sql', 'celery', 'service',
-      'signals', 'migration', 'migrations', 'drf', 'serializer', 'viewset',
-      'fsm', 'workflow', 'decimal',
+      'backend', 'django', 'fastapi', 'flask', 'orm', 'database', 'sql',
+      'sqlite', 'postgres', 'mysql', 'redis', 'schema', 'cache', 'caching',
+      'queue', 'kafka', 'rabbitmq', 'celery', 'service', 'signals',
+      'migration', 'drf', 'serializer', 'viewset', 'fsm', 'workflow',
+      'decimal', 'api', 'rest', 'graphql', 'grpc', 'crud', 'async',
+      'realtime', 'websocket', 'module', 'crm', 'erp', 'payroll', 'billing',
+      'invoice', 'warehouse', 'finance', 'report', 'pdf', 'weasyprint',
+      'onboarding', 'approval',
     ],
   },
 ];
 
+/** Keywords shorter than this match tokens exactly; longer ones also match as a prefix. */
+const STEM_MIN_LENGTH = 5;
+
 /** Infer a room from an unknown agent name by matching known keyword tokens. */
 export function inferRoomByName(name: string): string {
-  const lower = name.toLowerCase();
-  const tokens = new Set(lower.split(/[-_/.]+/).filter(Boolean));
+  const tokens = name.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  const squashed = tokens.join('');
   for (const rule of KEYWORD_RULES) {
-    if (rule.keywords.some((kw) => tokens.has(kw))) {
+    const tokenHit = rule.keywords.some((kw) =>
+      tokens.some((t) => t === kw || (kw.length >= STEM_MIN_LENGTH && t.startsWith(kw))),
+    );
+    if (tokenHit || rule.phrases?.some((p) => squashed.includes(p))) {
       return rule.room;
     }
   }

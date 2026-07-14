@@ -11,4 +11,6 @@ window.__ROOM_ICONS = {
   'ai-lab': "<svg viewBox=\"0 0 14 14\"><circle cx=\"7\" cy=\"5\" r=\"3\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.2\"/><path d=\"M5 8v3M9 8v3M3 13h8\" stroke=\"currentColor\" stroke-width=\"1.1\" stroke-linecap=\"round\"/><circle cx=\"6\" cy=\"4.8\" r=\"0.7\" fill=\"currentColor\"/><circle cx=\"8\" cy=\"4.8\" r=\"0.7\" fill=\"currentColor\"/></svg>",
   iot: "<svg viewBox=\"0 0 14 14\"><circle cx=\"7\" cy=\"7\" r=\"1.6\" fill=\"currentColor\"/><path d=\"M4.2 4.2a4 4 0 000 5.6M9.8 4.2a4 4 0 010 5.6M2.4 2.4a6.5 6.5 0 000 9.2M11.6 2.4a6.5 6.5 0 010 9.2\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.1\" stroke-linecap=\"round\"/></svg>",
   lobby: "<svg viewBox=\"0 0 14 14\"><path d=\"M2 12V6l5-4 5 4v6H8.5V9h-3v3z\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.3\" stroke-linejoin=\"round\"/></svg>",
+  // Generic door — custom rooms (any id without a curated icon above).
+  _custom: "<svg viewBox=\"0 0 14 14\"><rect x=\"3\" y=\"1.5\" width=\"8\" height=\"11\" rx=\"1\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.3\"/><circle cx=\"9\" cy=\"7\" r=\"0.9\" fill=\"currentColor\"/><path d=\"M1.5 12.5h11\" stroke=\"currentColor\" stroke-width=\"1.2\" stroke-linecap=\"round\"/></svg>",
 };

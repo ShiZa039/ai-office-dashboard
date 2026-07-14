@@ -18,6 +18,9 @@ export const HOOK_EVENTS: ReadonlyArray<{ hookEvent: string; arg: string }> = [
   { hookEvent: 'Notification', arg: 'agent_waiting' },
   // Fires when the user submits a prompt — clears the waiting state.
   { hookEvent: 'UserPromptSubmit', arg: 'user_prompt' },
+  // Emergency-stop gate: while ~/.claude/office-stop.json is active, every
+  // tool call is denied (dashboard "stop" button). No-op otherwise.
+  { hookEvent: 'PreToolUse', arg: 'stop_gate' },
 ];
 
 export function hookScriptFileFor(runtime: HookRuntime): string {

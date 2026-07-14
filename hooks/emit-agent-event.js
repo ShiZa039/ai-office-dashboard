@@ -6,7 +6,12 @@
  * Reads hook JSON from stdin, appends event to ~/.claude/agent-events.jsonl.
  * Usage: node emit-agent-event.js <event_type>
  *   event_type: session_start | agent_start | agent_stop | session_stop
- *             | agent_waiting | user_prompt
+ *             | agent_waiting | user_prompt | stop_gate
+ *
+ * stop_gate is special: it is a PreToolUse hook, not an event emitter. While
+ * ~/.claude/office-stop.json is active it denies every tool call (emergency
+ * stop from the dashboard); otherwise it exits instantly without touching the
+ * events file. A user_prompt event releases the stop for its cwd.
  */
 'use strict';
 const fs = require('fs');
@@ -14,6 +19,76 @@ const os = require('os');
 const path = require('path');
 
 const TRANSCRIPT_TAIL_BYTES = 256 * 1024;
+
+const STOP_REASON =
+  'Claude Office: EMERGENCY STOP activated by the user from the dashboard. ' +
+  'Do not call any more tools. End the turn immediately.';
+
+function stopFlagPath() {
+  return path.join(os.homedir(), '.claude', 'office-stop.json');
+}
+
+/** Parsed active stop flag, or null (missing / malformed / inactive). */
+function loadStopFlag() {
+  try {
+    const flag = JSON.parse(fs.readFileSync(stopFlagPath(), 'utf-8').trim());
+    return flag && typeof flag === 'object' && flag.active ? flag : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function normPath(p) {
+  let n = path.normalize(p);
+  while (n.length > 1 && n.endsWith(path.sep)) n = n.slice(0, -1);
+  return process.platform === 'win32' ? n.toLowerCase() : n;
+}
+
+/**
+ * True when the stop flag applies to a session running in `cwd`.
+ * An empty/absent cwds list means a global stop (all sessions).
+ */
+function stopCoversCwd(flag, cwd) {
+  const cwds = flag.cwds;
+  if (!Array.isArray(cwds) || cwds.length === 0) return true;
+  if (typeof cwd !== 'string' || !cwd) return false;
+  const target = normPath(cwd);
+  for (const base of cwds) {
+    if (typeof base !== 'string' || !base) continue;
+    const b = normPath(base);
+    if (target === b || target.startsWith(b + path.sep)) return true;
+  }
+  return false;
+}
+
+/** PreToolUse gate: deny the tool call while the stop flag covers this cwd. */
+function stopGate(raw) {
+  const flag = loadStopFlag();
+  if (!flag) return;
+  let data = {};
+  try {
+    const trimmed = raw.trim();
+    data = trimmed ? JSON.parse(trimmed) : {};
+  } catch (e) {
+    data = {};
+  }
+  if (!stopCoversCwd(flag, data.cwd || '')) return;
+  process.stdout.write(JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason: STOP_REASON,
+    },
+  }) + '\n');
+}
+
+/** A new user prompt means "resume": drop the stop flag covering this cwd. */
+function releaseStopFlag(cwd) {
+  const flag = loadStopFlag();
+  if (flag && stopCoversCwd(flag, cwd)) {
+    try { fs.unlinkSync(stopFlagPath()); } catch (e) { /* best effort */ }
+  }
+}
 
 /**
  * Best-effort model ID for the session. SessionStart payloads carry `model`
@@ -94,6 +169,14 @@ function emit(raw) {
   // user_prompt carries no payload on purpose — the prompt text stays private.
 
   fs.appendFileSync(eventFile, JSON.stringify(event) + '\n', 'utf-8');
+
+  if (eventType === 'user_prompt') releaseStopFlag(event.cwd);
+}
+
+// stop_gate fast path: no flag file — allow without even reading stdin.
+// This hook runs on every tool call, so the common case must stay cheap.
+if ((process.argv[2] || '') === 'stop_gate' && !fs.existsSync(stopFlagPath())) {
+  process.exit(0);
 }
 
 let input = '';
@@ -101,7 +184,8 @@ process.stdin.setEncoding('utf-8');
 process.stdin.on('data', (chunk) => { input += chunk; });
 process.stdin.on('end', () => {
   try {
-    emit(input);
+    if ((process.argv[2] || '') === 'stop_gate') stopGate(input);
+    else emit(input);
   } catch (e) {
     // A hook must never fail the Claude Code session.
   }

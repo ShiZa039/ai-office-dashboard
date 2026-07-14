@@ -10,6 +10,7 @@ var TIMELINE_WINDOW_KEY = "claudeOffice.timelineWindowMs";
 var currentTimelineMs = 5 * 60 * 1000;
 var lastUsage = null;
 var currentWaiting = null;
+var stopActive = false;
 // The main chat model is visualized by the top banner, not a room figure.
 var MAIN_AGENT = "Claude (main)";
 var mainWorkingSince = null;
@@ -20,11 +21,46 @@ try {
   if (savedHideIdle !== null) hideIdle = savedHideIdle === "1";
 } catch(e) { /* localStorage unavailable */ }
 
-var ROOM_COLORS = {
-  directors: "#eab308", backend: "#3b82f6", frontend: "#a855f7",
-  qa: "#22c55e", security: "#ef4444", devops: "#f97316",
-  integrations: "#06b6d4", "ai-lab": "#ec4899", iot: "#84cc16", lobby: "#14b8a6",
+// ── Rooms ──
+// The floor is built dynamically: a room exists only while the project has an
+// agent assigned to it. Known ids carry curated labels/colors; any other id
+// (e.g. a custom room from `.claude/office-rooms.json`) gets a generated
+// label, a palette color picked by name hash, and a generic icon.
+var ROOM_META = {
+  directors:    { color: "#eab308", label: { en: "Directors",    ru: "Дирекция" } },
+  backend:      { color: "#3b82f6", label: { en: "Backend",      ru: "Бэкенд" } },
+  frontend:     { color: "#a855f7", label: { en: "Frontend",     ru: "Фронтенд" } },
+  qa:           { color: "#22c55e", label: { en: "QA Lab",       ru: "QA-лаборатория" } },
+  security:     { color: "#ef4444", label: { en: "Security",     ru: "Безопасность" } },
+  devops:       { color: "#f97316", label: { en: "DevOps",       ru: "DevOps" } },
+  integrations: { color: "#06b6d4", label: { en: "Integrations", ru: "Интеграции" } },
+  "ai-lab":     { color: "#ec4899", label: { en: "AI Lab",       ru: "AI-лаборатория" } },
+  iot:          { color: "#84cc16", label: { en: "IoT",          ru: "IoT" } },
+  lobby:        { color: "#14b8a6", label: { en: "Lobby",        ru: "Лобби" } },
 };
+// Display order for known rooms; custom rooms sort after them alphabetically,
+// the lobby always closes the floor as a full-width row.
+var ROOM_ORDER = ["directors", "backend", "frontend", "qa", "security", "devops", "integrations", "ai-lab", "iot"];
+var CUSTOM_ROOM_PALETTE = ["#f43f5e", "#8b5cf6", "#0ea5e9", "#10b981", "#f59e0b", "#d946ef", "#64748b", "#eab308"];
+
+function roomColor(room) {
+  if (ROOM_META[room]) return ROOM_META[room].color;
+  var h = 0;
+  for (var i = 0; i < room.length; i++) h = (h * 31 + room.charCodeAt(i)) >>> 0;
+  return CUSTOM_ROOM_PALETTE[h % CUSTOM_ROOM_PALETTE.length];
+}
+
+function roomLabel(room) {
+  var meta = ROOM_META[room];
+  if (meta) return meta.label[UI_LANG] || meta.label.en;
+  // "ml-pipeline" → "Ml Pipeline"
+  return room.replace(/[-_]+/g, " ").replace(/\b\w/g, function(ch) { return ch.toUpperCase(); });
+}
+
+function roomIcon(room) {
+  var icons = window.__ROOM_ICONS || {};
+  return icons[room] || icons._custom || icons.lobby || "";
+}
 
 // ── UI localization ──
 // The extension stamps VSCode's display language into <html lang="…">.
@@ -50,6 +86,7 @@ var MESSAGES = {
     idleTitleCollapsed: "Idle agents are collapsed into per-room “+N” chips. Click to show them.",
     idleTitleExpanded: "Click to collapse idle agents into per-room “+N” chips.",
     waitingForEvents: "waiting for events...",
+    floorEmpty: "No agents in this project yet — rooms appear as Claude Code works here",
     resetsSoon: "resets soon",
     resetsIn: "resets in {d}",
     updatedAt: "updated {t}",
@@ -72,6 +109,13 @@ var MESSAGES = {
     labelWeekly: "Weekly ($)",
     labelWeeklyOpus: "Weekly Opus ($)",
     tl5: "5 min", tl15: "15 min", tl30: "30 min", tl1h: "1 hour", tl6h: "6 hours",
+    stopActive: "Emergency stop is active",
+    stopHint: "All agent tool calls are blocked. Press Resume or just send Claude a new prompt.",
+    stopResume: "Resume",
+    stopBtnTitle: "Emergency stop — block all agent tool calls now",
+    resumeBtnTitle: "Emergency stop is active — click to resume",
+    logStopOn: "EMERGENCY STOP — agents blocked",
+    logStopOff: "emergency stop released",
   },
   ru: {
     waitingForYou: "ждёт вашего ответа",
@@ -87,6 +131,7 @@ var MESSAGES = {
     idleTitleCollapsed: "Неактивные агенты свёрнуты в чипы «+N» по комнатам. Нажмите, чтобы показать их.",
     idleTitleExpanded: "Нажмите, чтобы свернуть неактивных агентов в чипы «+N» по комнатам.",
     waitingForEvents: "ожидание событий...",
+    floorEmpty: "В этом проекте пока нет агентов — комнаты появятся, когда Claude Code начнёт здесь работать",
     resetsSoon: "скоро сброс",
     resetsIn: "сброс через {d}",
     updatedAt: "обновлено {t}",
@@ -109,6 +154,13 @@ var MESSAGES = {
     labelWeekly: "За неделю ($)",
     labelWeeklyOpus: "Opus за неделю ($)",
     tl5: "5 мин", tl15: "15 мин", tl30: "30 мин", tl1h: "1 час", tl6h: "6 часов",
+    stopActive: "Экстренная остановка активна",
+    stopHint: "Все вызовы инструментов агентов блокируются. Нажмите «Продолжить» или просто отправьте Claude новый промпт.",
+    stopResume: "Продолжить",
+    stopBtnTitle: "Экстренная остановка — немедленно заблокировать все вызовы инструментов",
+    resumeBtnTitle: "Экстренная остановка активна — нажмите, чтобы возобновить",
+    logStopOn: "ЭКСТРЕННАЯ ОСТАНОВКА — агенты заблокированы",
+    logStopOff: "экстренная остановка снята",
   },
 };
 var UI_MSG = MESSAGES[UI_LANG] || MESSAGES.en;
@@ -147,12 +199,72 @@ function localizeDom() {
 function getAgentIcon(agentName, room) {
   var avatarMap = window.__AGENT_AVATAR_MAP || {};
   var avatars = window.__AGENT_AVATARS || {};
-  var icons = window.__ROOM_ICONS || {};
 
   var avatarKey = avatarMap[agentName];
   if (avatarKey && avatars[avatarKey]) return avatars[avatarKey];
 
-  return icons[room] || icons["lobby"] || "";
+  return roomIcon(room);
+}
+
+/**
+ * Sort room ids for display: curated order first, then custom rooms
+ * alphabetically, lobby always last (it renders as a full-width row).
+ */
+function sortRooms(ids) {
+  return ids.slice().sort(function(a, b) {
+    if (a === "lobby") return 1;
+    if (b === "lobby") return -1;
+    var ia = ROOM_ORDER.indexOf(a), ib = ROOM_ORDER.indexOf(b);
+    if (ia !== -1 && ib !== -1) return ia - ib;
+    if (ia !== -1) return -1;
+    if (ib !== -1) return 1;
+    return a < b ? -1 : a > b ? 1 : 0;
+  });
+}
+
+/**
+ * Rebuild the floor so it contains exactly the given rooms, in order.
+ * Cheap when nothing changed (signature check); a full rebuild otherwise —
+ * agent badges are re-rendered by the caller right after.
+ */
+function ensureRooms(roomIds) {
+  var floor = document.getElementById("floor");
+  var empty = document.getElementById("floor-empty");
+  if (!floor) return;
+
+  var ordered = sortRooms(roomIds);
+  var signature = ordered.join("|");
+  if (floor.getAttribute("data-rooms") === signature) return;
+  floor.setAttribute("data-rooms", signature);
+
+  floor.querySelectorAll(".room").forEach(function(el) { el.remove(); });
+  if (empty) empty.hidden = ordered.length > 0;
+
+  for (var i = 0; i < ordered.length; i++) {
+    var id = ordered[i];
+    var room = document.createElement("div");
+    room.className = "room" + (id === "lobby" ? " room--lobby" : "");
+    room.setAttribute("data-room", id);
+    room.style.setProperty("--room-accent", roomColor(id));
+
+    var header = document.createElement("div");
+    header.className = "room-header";
+    var icon = document.createElement("span");
+    icon.className = "room-icon";
+    icon.innerHTML = roomIcon(id);
+    var label = document.createElement("span");
+    label.className = "room-label";
+    label.textContent = roomLabel(id);
+    header.appendChild(icon);
+    header.appendChild(label);
+
+    var agents = document.createElement("div");
+    agents.className = "agents";
+
+    room.appendChild(header);
+    room.appendChild(agents);
+    floor.appendChild(room);
+  }
 }
 
 function shortName(name) {
@@ -225,6 +337,13 @@ function setModel(model) {
 
 function render() {
   // noqa: secret
+  // The floor holds exactly the rooms the current agents occupy.
+  var neededRooms = {};
+  Object.keys(currentAgents).forEach(function(n) {
+    if (n !== MAIN_AGENT) neededRooms[currentAgents[n].room || "lobby"] = true;
+  });
+  ensureRooms(Object.keys(neededRooms));
+
   document.querySelectorAll(".room .agents").forEach(function(el) { el.innerHTML = ""; }); // noqa: secret
   document.querySelectorAll(".room").forEach(function(el) { el.classList.remove("room--active"); }); // noqa: secret
 
@@ -441,7 +560,7 @@ function drawSpan(ctx, W, H, startTime, now, spanStart, spanEnd, room, active) {
   var x1 = Math.max(0, ((spanStart - startTime) / windowMs) * W);
   var x2 = Math.min(W, ((spanEnd - startTime) / windowMs) * W);
   if (x2 <= 0 || x1 >= W) return;
-  ctx.fillStyle = ROOM_COLORS[room] || "#888";
+  ctx.fillStyle = room ? roomColor(room) : "#888";
   ctx.globalAlpha = active ? 0.8 : 0.5;
   ctx.fillRect(x1, 3, Math.max(x2 - x1, 2), H - 6);
   ctx.globalAlpha = 1;
@@ -474,6 +593,41 @@ function addLogEntry(agent, event, task, room) {
   entry.textContent = time + "  " + arrow + "  " + label;
   log.appendChild(entry);
 
+  while (log.children.length > 50) log.removeChild(log.firstChild);
+  log.scrollTop = log.scrollHeight;
+}
+
+// ── Emergency stop ──
+// Mirrors ~/.claude/office-stop.json (via the extension): while active, the
+// stop_gate hook denies every agent tool call. The button and the banner's
+// Resume both just ask the extension to toggle the flag.
+function renderStop() {
+  var banner = document.getElementById("stop-banner");
+  if (banner) banner.hidden = !stopActive;
+  var btn = document.getElementById("stop-btn");
+  if (btn) {
+    btn.classList.toggle("stop-btn--active", stopActive);
+    btn.title = tr(stopActive ? "resumeBtnTitle" : "stopBtnTitle");
+  }
+}
+
+function initStopControls() {
+  ["stop-btn", "stop-resume"].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.addEventListener("click", function() {
+      vscode.postMessage({ type: "toggle_stop" });
+    });
+  });
+  renderStop();
+}
+
+function addStopLogEntry(on) {
+  var log = document.getElementById("event-log");
+  if (!log) return;
+  var entry = document.createElement("div");
+  entry.className = "event-log-entry event-log-entry--" + (on ? "error" : "start");
+  entry.textContent = formatTime(Date.now()) + "  " + (on ? "🛑" : "▶") + "  " + tr(on ? "logStopOn" : "logStopOff");
+  log.appendChild(entry);
   while (log.children.length > 50) log.removeChild(log.firstChild);
   log.scrollTop = log.scrollHeight;
 }
@@ -521,6 +675,11 @@ window.addEventListener("message", function(evt) { // noqa: secret
     renderUsage();
   } else if (msg.type === "usage_error") {
     renderUsageError(msg.source, msg.message);
+  } else if (msg.type === "stop_state") {
+    var wasStopped = stopActive;
+    stopActive = !!msg.active;
+    if (wasStopped !== stopActive) addStopLogEntry(stopActive);
+    renderStop();
   }
 });
 
@@ -756,6 +915,7 @@ function renderUsageError(source, message) {
 localizeDom();
 initTimelineSelector();
 initIdleToggle();
+initStopControls();
 vscode.postMessage({ type: "webview_ready" });
 setInterval(function() { renderTimeline(); renderMainBanner(); }, 2000); // banner: keep "· Nm" duration fresh
 setInterval(function() { renderUsage(); }, 30000); // keep "resets in …" countdown fresh
