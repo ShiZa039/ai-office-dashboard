@@ -12,7 +12,7 @@
 ### Требования
 
 - VSCode ≥ 1.85
-- Claude Code CLI (любая версия с поддержкой `SubagentStart`/`SubagentStop`/`Stop` хуков)
+- Claude Code CLI с поддержкой хуков (`SubagentStart`/`SubagentStop`/`Stop`/`Notification`/`UserPromptSubmit`/`PreToolUse`)
 - Python 3 **или** Node.js в `PATH` (для хук-скрипта — расширение само найдёт, что есть)
 
 ### Шаги
@@ -22,12 +22,12 @@
    ```powershell
    # Windows
    & 'C:\Users\<user>\AppData\Local\Programs\Microsoft VS Code\bin\code.cmd' `
-     --install-extension 'D:\path\to\claude-office-dashboard-0.9.0.vsix' --force
+     --install-extension 'D:\path\to\claude-office-dashboard-0.13.0.vsix' --force
    ```
 
    ```bash
    # Linux/macOS
-   code --install-extension /path/to/claude-office-dashboard-0.9.0.vsix --force
+   code --install-extension /path/to/claude-office-dashboard-0.13.0.vsix --force
    ```
 
 2. `Ctrl+Shift+P` → **Developer: Reload Window**.
@@ -35,8 +35,8 @@
 
    Что при этом происходит:
    - `emit-agent-event.py` и `emit-agent-event.js` копируются в `~/.claude/hooks/`;
-   - в `~/.claude/settings.json` добавляются три хука (`SubagentStart`, `SubagentStop`, `Stop`). Существующее содержимое файла и чужие хуки не трогаются; перед записью создаётся бэкап `settings.json.claude-office.bak`;
-   - при обновлении расширения хук-скрипты обновляются автоматически.
+   - в `~/.claude/settings.json` добавляются семь хуков: `SessionStart`, `SubagentStart`, `SubagentStop`, `Stop` (события агентов), `Notification` (баннер «Claude ждёт вас»), `UserPromptSubmit` (начало хода + авто-снятие остановки), `PreToolUse` (гейт экстренной остановки). Существующее содержимое файла и чужие хуки не трогаются; перед записью создаётся бэкап `settings.json.claude-office.bak`;
+   - при обновлении расширения хук-скрипты и набор регистраций обновляются автоматически.
 
 4. Готово. Запусти Claude Code сессию в проекте и спавни любой субагент — фигурка появится в дашборде.
 
@@ -118,12 +118,15 @@
 
 Нужна только если автоустановка не подходит (например, `settings.json` генерируется другим инструментом).
 
-1. Скопируй `hooks/emit-agent-event.py` (или `.js`) из репозитория в `~/.claude/hooks/`.
-2. Добавь в `~/.claude/settings.json`:
+1. Скопируй `hooks/emit-agent-event.py` **и** `hooks/emit-agent-event.js` из репозитория в `~/.claude/hooks/`.
+2. Добавь в `~/.claude/settings.json` (полный набор — семь событий):
 
 ```json
 {
   "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "python \"$HOME/.claude/hooks/emit-agent-event.py\" session_start", "timeout": 5 } ] }
+    ],
     "SubagentStart": [
       { "hooks": [ { "type": "command", "command": "python \"$HOME/.claude/hooks/emit-agent-event.py\" agent_start", "timeout": 5 } ] }
     ],
@@ -132,12 +135,23 @@
     ],
     "Stop": [
       { "hooks": [ { "type": "command", "command": "python \"$HOME/.claude/hooks/emit-agent-event.py\" session_stop", "timeout": 5 } ] }
+    ],
+    "Notification": [
+      { "hooks": [ { "type": "command", "command": "python \"$HOME/.claude/hooks/emit-agent-event.py\" agent_waiting", "timeout": 5 } ] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command", "command": "python \"$HOME/.claude/hooks/emit-agent-event.py\" user_prompt", "timeout": 5 } ] }
+    ],
+    "PreToolUse": [
+      { "hooks": [ { "type": "command", "command": "python \"$HOME/.claude/hooks/emit-agent-event.py\" stop_gate", "timeout": 5 } ] }
     ]
   }
 }
 ```
 
 Для Node-варианта замени `python "...emit-agent-event.py"` на `node "...emit-agent-event.js"`. `$HOME` Claude Code раскрывает сам на всех платформах.
+
+Без `Notification`/`UserPromptSubmit` не будет баннера «Claude ждёт вас» и индикатора главной модели; без `PreToolUse` не будет работать экстренная остановка 🛑 (кнопка выставит флаг, но вызовы инструментов никто не заблокирует).
 
 3. Проверка: спавни субагент и посмотри хвост файла событий:
 
@@ -164,6 +178,8 @@ tail -5 ~/.claude/agent-events.jsonl                                 # Linux/mac
 | Plan usage: `token expired` | Токен протух | Запусти любую сессию Claude Code — токен обновится сам |
 | Plan usage: `HTTP 429` | Рейт-лимит эндпоинта | Само пройдёт; можно увеличить `usage.pollSeconds` |
 | Кириллица в `task` ломается | Старый `emit-agent-event.py` | Хук-скрипты обновляются автоматически при `hooks.autoSetup = true`; иначе переустанови хуки командой |
+| 🛑 не блокирует агентов | `PreToolUse`-хук не зарегистрирован (старый набор хуков) | **Install Claude Code Hooks** — недостающие события домерджатся |
+| Инструменты блокируются, хотя остановку не включал | Остался флаг остановки | Нажми «Продолжить» на дашборде, отправь новый промпт или удали `~/.claude/office-stop.json` |
 
 ---
 
