@@ -199,5 +199,36 @@ fs.writeFileSync(stopFlagFile, JSON.stringify({ active: true, cwds: [] }), 'utf-
 runHook('user_prompt', { session_id: 'S1', cwd: '/anywhere' });
 assert.ok(!fs.existsSync(stopFlagFile), 'global stop released by any prompt');
 
+// --- harness-injected prompts must NOT release the stop ---
+// Task notifications and system reminders arrive via UserPromptSubmit too;
+// only an explicit human prompt may resume.
+
+const automatedPrompts = [
+  '[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event.',
+  '  [SYSTEM NOTIFICATION] leading whitespace still counts',
+  '<system-reminder>background context</system-reminder>',
+  'Some wrapper text\n<task-notification>\n<task-id>abc</task-id>\n</task-notification>',
+];
+for (const prompt of automatedPrompts) {
+  fs.writeFileSync(stopFlagFile, JSON.stringify({ active: true, cwds: ['/p'] }), 'utf-8');
+  runHook('user_prompt', { session_id: 'S1', cwd: '/p', prompt });
+  assert.ok(
+    fs.existsSync(stopFlagFile),
+    `automated prompt keeps the flag: ${prompt.slice(0, 40)}`,
+  );
+  const e = lastEvent();
+  assert.strictEqual(e.event, 'user_prompt', 'event still emitted for automated prompt');
+}
+
+// A genuine prompt that merely mentions the markers mid-text is not automated…
+fs.writeFileSync(stopFlagFile, JSON.stringify({ active: true, cwds: ['/p'] }), 'utf-8');
+runHook('user_prompt', { session_id: 'S1', cwd: '/p', prompt: 'why does [SYSTEM NOTIFICATION appear in logs?' });
+assert.ok(!fs.existsSync(stopFlagFile), 'human prompt mentioning marker mid-text still releases');
+
+// …and a payload without a prompt field keeps the documented release behavior.
+fs.writeFileSync(stopFlagFile, JSON.stringify({ active: true, cwds: ['/p'] }), 'utf-8');
+runHook('user_prompt', { session_id: 'S1', cwd: '/p' });
+assert.ok(!fs.existsSync(stopFlagFile), 'missing prompt field → release (backward compatible)');
+
 fs.rmSync(home, { recursive: true, force: true });
 console.log('All emitAgentEvent tests passed.');

@@ -11,7 +11,10 @@
  * stop_gate is special: it is a PreToolUse hook, not an event emitter. While
  * ~/.claude/office-stop.json is active it denies every tool call (emergency
  * stop from the dashboard); otherwise it exits instantly without touching the
- * events file. A user_prompt event releases the stop for its cwd.
+ * events file. A user_prompt event releases the stop for its cwd — but only
+ * when the prompt was actually typed by the human: harness-injected turns
+ * (task notifications, system reminders) also arrive via UserPromptSubmit
+ * and must not lift an emergency stop.
  */
 'use strict';
 const fs = require('fs');
@@ -80,6 +83,23 @@ function stopGate(raw) {
       permissionDecisionReason: STOP_REASON,
     },
   }) + '\n');
+}
+
+/**
+ * True for prompts injected by the harness rather than typed by the user:
+ * background-task notifications and system reminders flow through
+ * UserPromptSubmit with these markers. Resuming from an emergency stop
+ * requires an explicit human action, so such prompts never release the flag.
+ * Keep in sync with emit-agent-event.py.
+ */
+function isAutomatedPrompt(prompt) {
+  if (typeof prompt !== 'string') return false;
+  const p = prompt.trimStart();
+  return (
+    p.startsWith('[SYSTEM NOTIFICATION') ||
+    p.startsWith('<system-reminder>') ||
+    p.includes('<task-notification>')
+  );
 }
 
 /**
@@ -196,7 +216,9 @@ function emit(raw) {
 
   fs.appendFileSync(eventFile, JSON.stringify(event) + '\n', 'utf-8');
 
-  if (eventType === 'user_prompt') releaseStopFlag(event.cwd);
+  if (eventType === 'user_prompt' && !isAutomatedPrompt(data.prompt)) {
+    releaseStopFlag(event.cwd);
+  }
 }
 
 // stop_gate fast path: no flag file — allow without even reading stdin.

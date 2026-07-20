@@ -8,7 +8,10 @@ Usage: python emit-agent-event.py <event_type>
 stop_gate is special: it is a PreToolUse hook, not an event emitter. While
 ~/.claude/office-stop.json is active it denies every tool call (emergency
 stop from the dashboard); otherwise it exits instantly without touching the
-events file. A user_prompt event releases the stop for its cwd.
+events file. A user_prompt event releases the stop for its cwd — but only
+when the prompt was actually typed by the human: harness-injected turns
+(task notifications, system reminders) also arrive via UserPromptSubmit
+and must not lift an emergency stop.
 """
 import json
 import sys
@@ -76,6 +79,23 @@ def handle_stop_gate():
             "permissionDecisionReason": STOP_REASON,
         }
     }))
+
+def is_automated_prompt(prompt):
+    """True for prompts injected by the harness rather than typed by the user.
+
+    Background-task notifications and system reminders flow through
+    UserPromptSubmit with these markers. Resuming from an emergency stop
+    requires an explicit human action, so such prompts never release the
+    flag. Keep in sync with emit-agent-event.js.
+    """
+    if not isinstance(prompt, str):
+        return False
+    p = prompt.lstrip()
+    return (
+        p.startswith("[SYSTEM NOTIFICATION")
+        or p.startswith("<system-reminder>")
+        or "<task-notification>" in p
+    )
 
 def release_stop_flag(cwd):
     """A new user prompt means "resume" — but only for this cwd.
@@ -190,7 +210,7 @@ def main():
     with open(event_file, "a", encoding="utf-8") as f:
         f.write(json.dumps(event, ensure_ascii=False) + "\n")
 
-    if event_type == "user_prompt":
+    if event_type == "user_prompt" and not is_automated_prompt(data.get("prompt")):
         release_stop_flag(cwd)
 
 if __name__ == "__main__":
