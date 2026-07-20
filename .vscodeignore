@@ -4,13 +4,8 @@ src/**
 test/**
 out/test/**
 node_modules/**
-hooks/_write_icons.py
-hooks/debug-stdin.py
 hooks/__pycache__/**
-PLAN.md
 ROADMAP.md
-BUG_REPORT_*.md
-SIGNE-SERVER-TODO.md
 tsconfig.json
 *.jpg
 *.vsix
