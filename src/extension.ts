@@ -143,7 +143,7 @@ export function activate(context: vscode.ExtensionContext) {
       if (stopActive) {
         const remaining = deactivateStopFlag(readStopFlag(), currentCwdFilter());
         if (remaining) {
-          // Другие окна ставили стоп на свои проекты — их не трогаем.
+          // Other windows stopped their own projects — leave those untouched.
           writeStopFlag(remaining);
           void vscode.window.showInformationMessage(
             ru
@@ -161,7 +161,7 @@ export function activate(context: vscode.ExtensionContext) {
       } else {
         const cwds = currentCwdFilter();
         if (!cwds || cwds.length === 0) {
-          // Нет папки (или scope=global) — стоп накроет все сессии на машине.
+          // No folder open (or scope=global) — the stop will cover every session on this machine.
           const confirmLabel = ru ? 'Остановить всё' : 'Stop everything';
           const picked = await vscode.window.showWarningMessage(
             ru

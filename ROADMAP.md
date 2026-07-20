@@ -1,6 +1,8 @@
 # Roadmap — Claude Office Dashboard
 
-История релизов и план развития. Текущая версия — `v0.13.0`.
+История релизов и план развития. Текущая версия — `v0.13.2`.
+
+> This file is maintained in Russian only (internal dev history). User-facing docs are bilingual: [README.md](README.md) / [README.ru.md](README.ru.md), [INSTALL.md](INSTALL.md) / [INSTALL.ru.md](INSTALL.ru.md).
 
 ---
 
@@ -202,7 +204,7 @@
 
 ### v1.0 — стабильность
 
-- [ ] Документация настроек на английском (для Marketplace).
+- [x] Документация на английском (для Marketplace) — README.md / INSTALL.md переведены, русские версии в `*.ru.md` с переключателем языка (2026-07-20).
 - [ ] CI: GitHub Actions запускает `npm test` на push/PR.
 - [ ] Smoke-тест: vsce package + установка в headless VSCode.
 - [ ] Покрытие тестами `eventWatcher.ts` (сейчас не покрыт — fs.watch сложно мокать).
@@ -235,4 +237,4 @@
 5. `git push origin master --tags`.
 6. (после v0.9.x) GitHub Release + автоматический `vsce publish`.
 
-См. [INSTALL.md → Обновление расширения](INSTALL.md#обновление-расширения).
+См. [INSTALL.ru.md → Обновление расширения](INSTALL.ru.md#обновление-расширения).

@@ -1,135 +1,137 @@
 # Claude Office Dashboard
 
-> VSCode-расширение, визуализирующее работу Claude Code как карту офиса с комнатами. Каждый субагент появляется фигуркой в своей «комнате» (Backend, Frontend, QA, Security, DevOps, AI-lab и т.д.), пульсирует пока работает, и отмечается галочкой по завершении. Сверху — индикатор главной модели, лимиты подписки и кнопка экстренной остановки.
+**Language:** **English** · [Русский](README.ru.md)
 
-**Текущая версия:** `v0.13.0` · zero-config: автоустановка хуков, авто-обнаружение агентов, динамические комнаты, реальные лимиты Pro/Max, экстренная остановка агентов, UI en/ru.
+> A VSCode extension that visualizes Claude Code activity as an office floor map. Every subagent shows up as a figure in its own "room" (Backend, Frontend, QA, Security, DevOps, AI-lab, etc.), pulses while working, and gets a checkmark when done. On top: a main-model indicator, subscription usage limits, and an emergency stop button.
+
+**Current version:** `v0.13.2` · zero-config: automatic hook installation, agent auto-discovery, dynamic rooms, real Pro/Max plan limits, agent emergency stop, en/ru UI.
 
 ---
 
-## Зачем это
+## Why
 
-Когда оркестрируешь несколько субагентов параллельно — теряешь представление о том, кто чем занят и сколько ещё ждать. Этот дашборд даёт:
+When you orchestrate several subagents in parallel, you lose track of who is doing what and how long is left. This dashboard gives you:
 
-- **Карту офиса** — кто работает прямо сейчас и в каком модуле. Комнаты строятся динамически из фактического состава агентов проекта (`.claude/agents/` + события сессий).
-- **Индикатор главной модели** — плашка сверху: ✋ жёлтая «Claude ждёт вас», ⚡ синяя «работает · Fable 5 · 3m», ✓ зелёная вспышка «ход завершён».
-- **Экстренную остановку 🛑** — одна кнопка блокирует все вызовы инструментов агентов через `PreToolUse`-хук; сессия и контекст сохраняются. Снятие — кнопкой или просто новым промптом.
-- **Статус-бар** — ✋ waiting / 🛑 stop / N working / errors, даже когда панель закрыта.
-- **Timeline** (Canvas) — кто запускался когда, окно настраивается (5 мин — 6 часов).
-- **Activity log** — последние 50 событий start/stop/waiting/stop-toggle.
-- **Plan usage** — реальные лимиты подписки (Pro/Max): 5-часовая сессия, недельные лимиты — с процентами, временем сброса и прогнозом «достигнет 100% через ~2ч при текущем темпе». Тот же API, что и `/usage` в Claude Code.
-- **Per-window isolation** — каждое окно VSCode видит только свои сессии (фильтр по `cwd` workspace).
-- **Локализация** — интерфейс en/ru, язык берётся из ОС (настраивается).
+- **An office map** — who is working right now and in which module. Rooms are built dynamically from the project's actual agent roster (`.claude/agents/` + session events).
+- **A main-model indicator** — a banner at the top: ✋ yellow "Claude is waiting for you", ⚡ blue "working · Fable 5 · 3m", ✓ green flash "finished the turn".
+- **An emergency stop 🛑** — one button blocks all agent tool calls via a `PreToolUse` hook; the session and its context are preserved. Release it with the button or simply by sending a new prompt.
+- **A status bar item** — ✋ waiting / 🛑 stop / N working / errors, even while the panel is closed.
+- **A timeline** (Canvas) — who ran when, with a configurable window (5 min — 6 hours).
+- **An activity log** — the last 50 start/stop/waiting/stop-toggle events.
+- **Plan usage** — real subscription limits (Pro/Max): the 5-hour session window and weekly limits, with percentages, reset times, and a forecast like "hits 100% in ~2h at the current pace". Same API as `/usage` in Claude Code.
+- **Per-window isolation** — each VSCode window only sees its own sessions (filtered by workspace `cwd`).
+- **Localization** — en/ru UI, language taken from the OS (configurable).
 
-## Установка — zero config
+## Installation — zero config
 
-1. Установи `.vsix`:
+1. Install the `.vsix`:
 
    ```
-   code --install-extension claude-office-dashboard-0.13.0.vsix --force
+   code --install-extension claude-office-dashboard-0.13.2.vsix --force
    ```
 
-2. Reload Window → в Activity Bar появится иконка домика.
-3. При первом запуске расширение само предложит установить хуки Claude Code (**Install** в уведомлении). Всё: скрипты копируются в `~/.claude/hooks/`, регистрация аккуратно мерджится в `~/.claude/settings.json` (существующие настройки и чужие хуки не трогаются, создаётся бэкап `settings.json.claude-office.bak`). При обновлении расширения хуки обновляются автоматически.
+2. Reload Window → a house icon appears in the Activity Bar.
+3. On first launch the extension offers to install the Claude Code hooks itself (**Install** in the notification). That's it: scripts are copied into `~/.claude/hooks/`, and the registration is carefully merged into `~/.claude/settings.json` (existing settings and third-party hooks are left untouched; a `settings.json.claude-office.bak` backup is created). Hooks are updated automatically when the extension updates.
 
-Никакой привязки к проекту: открой любой проект — дашборд покажет его агентов и события его Claude Code сессий.
+Nothing is tied to a specific project: open any project and the dashboard shows its agents and its Claude Code session events.
 
-Ручная установка хуков и troubleshooting — [INSTALL.md](INSTALL.md).
+Manual hook installation and troubleshooting — [INSTALL.md](INSTALL.md).
 
-## Как это работает
+## How it works
 
 ```
 Claude Code hooks → ~/.claude/agent-events.jsonl → VSCode extension → Webview
         │                     ↑                          ↑
         │        emit-agent-event.py|.js      fs.watch + polling
-        └─ PreToolUse stop_gate ← ~/.claude/office-stop.json (🛑 кнопка)
+        └─ PreToolUse stop_gate ← ~/.claude/office-stop.json (🛑 button)
 ```
 
-1. Семь хуков Claude Code (`SessionStart`, `SubagentStart`, `SubagentStop`, `Stop`, `Notification`, `UserPromptSubmit`, `PreToolUse`) запускают `~/.claude/hooks/emit-agent-event.py` (или `.js`, если Python нет в PATH) — скрипт дописывает JSONL-событие.
-2. Расширение слушает файл (`fs.watch` + polling 1 сек) и держит in-memory стейт агентов.
-3. Webview рисует карту, timeline и счётчики; обновления через `postMessage`, при возврате видимости панель пересинхронизируется.
-4. Cwd-фильтр (`claudeOffice.scope = workspace`) отбрасывает события из других окон VSCode.
-5. Панель Plan usage опрашивает `api.anthropic.com/api/oauth/usage` с OAuth-токеном твоего логина Claude Code (`~/.claude/.credentials.json`; на macOS — Keychain). Токен никуда не отправляется, кроме API Anthropic.
-6. Экстренная остановка пишет флаг `~/.claude/office-stop.json`; `PreToolUse`-гейт отклоняет каждый вызов инструмента, пока флаг накрывает cwd сессии. Без флага гейт выходит мгновенно (одна проверка существования файла).
+1. Seven Claude Code hooks (`SessionStart`, `SubagentStart`, `SubagentStop`, `Stop`, `Notification`, `UserPromptSubmit`, `PreToolUse`) run `~/.claude/hooks/emit-agent-event.py` (or `.js` if Python is not in PATH) — the script appends a JSONL event.
+2. The extension watches the file (`fs.watch` + 1-second polling) and keeps agent state in memory.
+3. The webview renders the map, the timeline, and the counters; updates flow through `postMessage`, and the panel resyncs when it becomes visible again.
+4. The cwd filter (`claudeOffice.scope = workspace`) drops events from other VSCode windows.
+5. The Plan usage panel polls `api.anthropic.com/api/oauth/usage` with the OAuth token of your Claude Code login (`~/.claude/.credentials.json`; Keychain on macOS). The token is never sent anywhere except the Anthropic API.
+6. The emergency stop writes a `~/.claude/office-stop.json` flag; the `PreToolUse` gate rejects every tool call while the flag covers the session's cwd. Without the flag the gate exits instantly (a single file-existence check).
 
-## Экстренная остановка
+## Emergency stop
 
-Кнопка 🛑 на дашборде (или команда `Claude Office: Emergency Stop / Resume Agents`):
+The 🛑 button on the dashboard (or the `Claude Office: Emergency Stop / Resume Agents` command):
 
-- блокирует **новые** вызовы инструментов главного агента и всех сабагентов в проектах текущего окна; уже запущенная длинная команда (например, Bash-сборка) дорабатывает;
-- сессия и контекст сохраняются — это пауза, а не kill;
-- остановка **проектная**: флаг хранит папки workspace, сессии других проектов не задеваются. Тот же проект в другом окне/терминале тоже остановится;
-- окно без открытой папки (или `scope = global`) ставит **глобальный** стоп — перед этим показывается подтверждение;
-- снятие: кнопка «Продолжить» (снимает только свои папки — стопы других окон переживают), либо автоматически новым промптом в остановленном проекте. Считается только промпт, набранный человеком: системные инъекции (уведомления о завершении фоновых задач, `system-reminder`) проходят через тот же хук `UserPromptSubmit`, но остановку не снимают.
+- blocks **new** tool calls of the main agent and all subagents in the current window's projects; an already-running long command (e.g. a Bash build) finishes on its own;
+- the session and its context are preserved — it's a pause, not a kill;
+- the stop is **per-project**: the flag stores the workspace folders, so sessions of other projects are unaffected. The same project in another window/terminal stops too;
+- a window with no open folder (or `scope = global`) sets a **global** stop — a confirmation dialog is shown first;
+- release: the "Resume" button (releases only its own folders — stops set by other windows survive), or automatically by a new prompt in the stopped project. Only human-typed prompts count: system injections (background-task completion notifications, `system-reminder`) pass through the same `UserPromptSubmit` hook but do not release the stop.
 
-## Комнаты и маппинг агентов
+## Rooms and agent mapping
 
-Комнаты строятся динамически: рендерятся только те, где есть хоть один агент. Кураторские комнаты (`directors`, `backend`, `frontend`, `qa`, `security`, `devops`, `integrations`, `ai-lab`, `iot`, `lobby`) имеют свои иконки и цвета; любые кастомные id из маппинга создают собственные комнаты (цвет по хэшу).
+Rooms are built dynamically: only rooms with at least one agent are rendered. Curated rooms (`directors`, `backend`, `frontend`, `qa`, `security`, `devops`, `integrations`, `ai-lab`, `iot`, `lobby`) have their own icons and colors; any custom id from the mapping creates its own room (color derived from a hash).
 
-Куда попадает агент (по приоритету):
+Where an agent goes (by priority):
 
-1. **`.claude/office-rooms.json`** в проекте — явный маппинг, коммитится вместе с репо.
-2. **`claudeOffice.agentRooms`** в настройках VSCode.
-3. **Встроенные агенты Claude Code** — `general-purpose`, `Explore`, `Plan`, `code-reviewer` и т.п.
-4. **Keyword-эвристика** по имени (стем-матчинг, ~100 токенов) — `react-*` → frontend, `*-director` → directors, `postgres/schema` → backend, `docker/ci/deploy` → devops и т.д.
-5. **Лобби** — всё неопознанное.
+1. **`.claude/office-rooms.json`** in the project — explicit mapping, committed with the repo.
+2. **`claudeOffice.agentRooms`** in VSCode settings.
+3. **Built-in Claude Code agents** — `general-purpose`, `Explore`, `Plan`, `code-reviewer`, etc.
+4. **Keyword heuristics** on the name (stem matching, ~100 tokens) — `react-*` → frontend, `*-director` → directors, `postgres/schema` → backend, `docker/ci/deploy` → devops, and so on.
+5. **Lobby** — everything unrecognized.
 
-Для большинства проектов эвристики достаточно — ничего настраивать не нужно.
+For most projects the heuristics are enough — no configuration needed.
 
-## Конфигурация
+## Configuration
 
-| Setting | Default | Описание |
-|---------|---------|----------|
-| `claudeOffice.language` | `system` | Язык UI: `system` (язык ОС) / `vscode` / `en` / `ru` |
-| `claudeOffice.hooks.autoSetup` | `true` | Предлагать автоустановку хуков и обновлять хук-скрипты |
-| `claudeOffice.statusBar.enabled` | `true` | Айтем в статус-баре (waiting / stop / working / errors) |
-| `claudeOffice.roster.enabled` | `true` | Показывать агентов проекта из `.claude/agents/` сразу (idle) |
-| `claudeOffice.scope` | `workspace` | `workspace` = только это окно (фильтр по cwd); `global` = все окна |
-| `claudeOffice.agentRooms` | `{}` | Кастомный маппинг агентов в комнаты |
-| `claudeOffice.eventsFile` | `~/.claude/agent-events.jsonl` | Путь к JSONL-файлу событий |
-| `claudeOffice.usage.enabled` | `true` | Панель Plan usage (реальные лимиты подписки) |
-| `claudeOffice.usage.pollSeconds` | `90` | Интервал обновления usage |
-| `claudeOffice.usage.costSource` | `off` | `ccusage` = дополнительные $-бары через `npx ccusage` |
-| `claudeOffice.usage.limitBlockUsd` | `0` | Лимит $ на 5-часовой блок (только для ccusage-баров) |
-| `claudeOffice.usage.limitWeeklyUsd` | `0` | Лимит $ на неделю (только для ccusage-баров) |
-| `claudeOffice.usage.limitWeeklyOpusUsd` | `0` | Лимит $ на неделю Opus (только для ccusage-баров) |
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `claudeOffice.language` | `system` | UI language: `system` (OS language) / `vscode` / `en` / `ru` |
+| `claudeOffice.hooks.autoSetup` | `true` | Offer automatic hook installation and keep hook scripts updated |
+| `claudeOffice.statusBar.enabled` | `true` | Status bar item (waiting / stop / working / errors) |
+| `claudeOffice.roster.enabled` | `true` | Show project agents from `.claude/agents/` immediately (idle) |
+| `claudeOffice.scope` | `workspace` | `workspace` = this window only (cwd filter); `global` = all windows |
+| `claudeOffice.agentRooms` | `{}` | Custom agent-to-room mapping |
+| `claudeOffice.eventsFile` | `~/.claude/agent-events.jsonl` | Path to the JSONL events file |
+| `claudeOffice.usage.enabled` | `true` | Plan usage panel (real subscription limits) |
+| `claudeOffice.usage.pollSeconds` | `90` | Usage refresh interval |
+| `claudeOffice.usage.costSource` | `off` | `ccusage` = extra $-bars via `npx ccusage` |
+| `claudeOffice.usage.limitBlockUsd` | `0` | $ limit per 5-hour block (ccusage bars only) |
+| `claudeOffice.usage.limitWeeklyUsd` | `0` | $ limit per week (ccusage bars only) |
+| `claudeOffice.usage.limitWeeklyOpusUsd` | `0` | $ limit per week for Opus (ccusage bars only) |
 
-## Команды
+## Commands
 
-- `Claude Office: Show Dashboard` — фокус на панель в Activity Bar
-- `Claude Office: Open Dashboard in Editor` — открыть как обычную вкладку (параллельно sidebar)
-- `Claude Office: Emergency Stop / Resume Agents` — 🛑 остановить/возобновить агентов
-- `Claude Office: Install Claude Code Hooks` — установить/починить хуки вручную
-- `Claude Office: Clear Events` — сброс кэша событий
+- `Claude Office: Show Dashboard` — focus the Activity Bar panel
+- `Claude Office: Open Dashboard in Editor` — open as a regular tab (alongside the sidebar)
+- `Claude Office: Emergency Stop / Resume Agents` — 🛑 stop/resume agents
+- `Claude Office: Install Claude Code Hooks` — install/repair hooks manually
+- `Claude Office: Clear Events` — reset the event cache
 
-Установленная версия расширения показывается в правом нижнем углу дашборда.
+The installed extension version is shown in the bottom-right corner of the dashboard.
 
-## Разработка
+## Development
 
 ```bash
 git clone https://github.com/ShiZa039/claude-office-dashboard.git
 cd claude-office-dashboard
 npm install
 npm run compile        # tsc → out/
-npm test               # unit-тесты (parser, types, state, hooks, usage, roster, stop)
-npx @vscode/vsce package  # собрать .vsix
+npm test               # unit tests (parser, types, state, hooks, usage, roster, stop)
+npx @vscode/vsce package  # build the .vsix
 ```
 
-История релизов и планы — [ROADMAP.md](ROADMAP.md).
+Release history and plans — [ROADMAP.md](ROADMAP.md) (in Russian).
 
-## Системные требования
+## Requirements
 
 - VSCode ≥ 1.85
-- Claude Code CLI с поддержкой хуков (`SubagentStart`/`SubagentStop`/`Stop`/`Notification`/`UserPromptSubmit`/`PreToolUse`)
-- Python 3 **или** Node.js в `PATH` (для хук-скрипта; расширение само выберет доступный)
-- Для панели Plan usage — логин Claude Code по подписке (Pro/Max). При работе по API-ключу панель лимитов недоступна; можно включить $-оценки через `claudeOffice.usage.costSource = "ccusage"`.
+- Claude Code CLI with hook support (`SubagentStart`/`SubagentStop`/`Stop`/`Notification`/`UserPromptSubmit`/`PreToolUse`)
+- Python 3 **or** Node.js in `PATH` (for the hook script; the extension picks whichever is available)
+- For the Plan usage panel — a Claude Code subscription login (Pro/Max). With an API key the limits panel is unavailable; you can enable $-estimates via `claudeOffice.usage.costSource = "ccusage"`.
 
-## Известные ограничения
+## Known limitations
 
-- `SubagentStart` не передаёт `description`/`prompt` ([anthropics/claude-code#19170](https://github.com/anthropics/claude-code/issues/19170)) — поле `task` заполняется из `last_assistant_message` в `agent_stop`.
-- Эндпоинт лимитов подписки недокументирован (тот же, что использует `/usage` в Claude Code) — формат может измениться; парсер устойчив к отсутствующим полям.
-- Экстренная остановка не прерывает уже выполняющийся вызов инструмента — блокируются только следующие.
-- Звуковые эффекты не планируются.
+- `SubagentStart` does not pass `description`/`prompt` ([anthropics/claude-code#19170](https://github.com/anthropics/claude-code/issues/19170)) — the `task` field is filled from `last_assistant_message` on `agent_stop`.
+- The subscription limits endpoint is undocumented (the same one `/usage` in Claude Code uses) — the format may change; the parser is resilient to missing fields.
+- The emergency stop does not interrupt a tool call that is already running — only subsequent calls are blocked.
+- Sound effects are not planned.
 
-## Лицензия
+## License
 
 [MIT](LICENSE)
