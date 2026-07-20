@@ -112,8 +112,9 @@ var MESSAGES = {
     stopActive: "Emergency stop is active",
     stopHint: "All agent tool calls are blocked. Press Resume or just send Claude a new prompt.",
     stopResume: "Resume",
-    stopBtnTitle: "Emergency stop — block all agent tool calls now",
-    resumeBtnTitle: "Emergency stop is active — click to resume",
+    stopBtnLabel: "Emergency stop",
+    stopBtnHint: "Block all agent tool calls immediately",
+    stopBtnTitle: "Emergency stop — block all agent tool calls now. Sessions and context survive; resume with the button or a new prompt.",
     logStopOn: "EMERGENCY STOP — agents blocked",
     logStopOff: "emergency stop released",
   },
@@ -157,8 +158,9 @@ var MESSAGES = {
     stopActive: "Экстренная остановка активна",
     stopHint: "Все вызовы инструментов агентов блокируются. Нажмите «Продолжить» или просто отправьте Claude новый промпт.",
     stopResume: "Продолжить",
-    stopBtnTitle: "Экстренная остановка — немедленно заблокировать все вызовы инструментов",
-    resumeBtnTitle: "Экстренная остановка активна — нажмите, чтобы возобновить",
+    stopBtnLabel: "Экстренная остановка",
+    stopBtnHint: "Мгновенно заблокировать все действия агентов",
+    stopBtnTitle: "Экстренная остановка — немедленно заблокировать все вызовы инструментов. Сессии и контекст сохраняются; возобновление кнопкой или новым промптом.",
     logStopOn: "ЭКСТРЕННАЯ ОСТАНОВКА — агенты заблокированы",
     logStopOff: "экстренная остановка снята",
   },
@@ -606,8 +608,9 @@ function renderStop() {
   if (banner) banner.hidden = !stopActive;
   var btn = document.getElementById("stop-btn");
   if (btn) {
-    btn.classList.toggle("stop-btn--active", stopActive);
-    btn.title = tr(stopActive ? "resumeBtnTitle" : "stopBtnTitle");
+    // While the stop is active, the red banner (with Resume) takes its place.
+    btn.hidden = stopActive;
+    btn.title = tr("stopBtnTitle");
   }
 }
 

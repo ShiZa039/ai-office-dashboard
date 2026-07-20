@@ -14,13 +14,20 @@
       <div class="office-logo">&#9670;</div>
       <h2 class="office-title">Claude Office</h2>
       <span class="office-model" id="office-model" hidden></span>
-      <button class="stop-btn" id="stop-btn" type="button" aria-label="Emergency stop">&#128721;</button>
       <button class="idle-toggle" id="idle-toggle" type="button">idle</button>
       <div class="office-status" id="office-status">
         <span class="status-dot status-dot--off"></span>
         <span id="status-text" data-i18n="statusOffline">offline</span>
       </div>
     </div>
+
+    <button class="stop-btn" id="stop-btn" type="button">
+      <span class="stop-btn-icon">&#128721;</span>
+      <span class="stop-btn-text">
+        <span class="stop-btn-label" data-i18n="stopBtnLabel">Emergency stop</span>
+        <span class="stop-btn-hint" data-i18n="stopBtnHint">Block all agent tool calls immediately</span>
+      </span>
+    </button>
 
     <div class="stop-banner" id="stop-banner" hidden>
       <span class="stop-banner-icon">&#128721;</span>
