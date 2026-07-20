@@ -82,12 +82,38 @@ function stopGate(raw) {
   }) + '\n');
 }
 
-/** A new user prompt means "resume": drop the stop flag covering this cwd. */
+/**
+ * A new user prompt means "resume" — but only for this cwd: overlapping
+ * entries are removed from the flag, stops on other projects survive. A
+ * global flag (empty cwds) has no per-project parts, so it is fully released.
+ */
 function releaseStopFlag(cwd) {
   const flag = loadStopFlag();
-  if (flag && stopCoversCwd(flag, cwd)) {
-    try { fs.unlinkSync(stopFlagPath()); } catch (e) { /* best effort */ }
+  if (!flag) return;
+  const cwds = Array.isArray(flag.cwds)
+    ? flag.cwds.filter((c) => typeof c === 'string' && c)
+    : [];
+  let remaining = [];
+  if (cwds.length > 0) {
+    if (typeof cwd !== 'string' || !cwd) return; // no cwd info — keep the stop
+    const target = normPath(cwd);
+    remaining = cwds.filter((base) => {
+      const b = normPath(base);
+      return target !== b && !target.startsWith(b + path.sep) && !b.startsWith(target + path.sep);
+    });
+    if (remaining.length === cwds.length) return; // prompt from an uncovered project
   }
+  try {
+    if (remaining.length > 0) {
+      fs.writeFileSync(
+        stopFlagPath(),
+        JSON.stringify({ ...flag, cwds: remaining }, null, 2) + '\n',
+        'utf-8',
+      );
+    } else {
+      fs.unlinkSync(stopFlagPath());
+    }
+  } catch (e) { /* best effort */ }
 }
 
 /**

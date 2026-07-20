@@ -14,6 +14,7 @@ import { isRussianUi } from './locale';
 import {
   activateStopFlag,
   clearStopFlag,
+  deactivateStopFlag,
   readStopFlag,
   stopAppliesToWindow,
   stopFlagPath,
@@ -98,7 +99,10 @@ export function activate(context: vscode.ExtensionContext) {
   log.appendLine(
     `Claude Office: cwd filter = ${filterDesc ? filterDesc.join(', ') : '(global, no filter)'}`,
   );
-  const provider = new OfficeDashboardProvider(context.extensionUri);
+  const provider = new OfficeDashboardProvider(
+    context.extensionUri,
+    String(context.extension.packageJSON.version ?? ''),
+  );
 
   const configPath = vscode.workspace
     .getConfiguration('claudeOffice')
@@ -133,19 +137,43 @@ export function activate(context: vscode.ExtensionContext) {
     updateStatusBar();
   };
 
-  const toggleStop = () => {
+  const toggleStop = async () => {
     const ru = isRussianUi();
     try {
       if (stopActive) {
-        clearStopFlag();
-        void vscode.window.showInformationMessage(
-          ru
-            ? 'Claude Office: экстренная остановка снята — агенты снова могут работать.'
-            : 'Claude Office: emergency stop released — agents may work again.',
-        );
+        const remaining = deactivateStopFlag(readStopFlag(), currentCwdFilter());
+        if (remaining) {
+          // Другие окна ставили стоп на свои проекты — их не трогаем.
+          writeStopFlag(remaining);
+          void vscode.window.showInformationMessage(
+            ru
+              ? 'Claude Office: остановка снята для этого проекта. Для других проектов она всё ещё активна.'
+              : 'Claude Office: stop released for this project. It is still active for other projects.',
+          );
+        } else {
+          clearStopFlag();
+          void vscode.window.showInformationMessage(
+            ru
+              ? 'Claude Office: экстренная остановка снята — агенты снова могут работать.'
+              : 'Claude Office: emergency stop released — agents may work again.',
+          );
+        }
       } else {
+        const cwds = currentCwdFilter();
+        if (!cwds || cwds.length === 0) {
+          // Нет папки (или scope=global) — стоп накроет все сессии на машине.
+          const confirmLabel = ru ? 'Остановить всё' : 'Stop everything';
+          const picked = await vscode.window.showWarningMessage(
+            ru
+              ? 'В этом окне нет открытой папки (или включён режим scope=global), поэтому остановка будет ГЛОБАЛЬНОЙ: заблокируются все сессии Claude Code на этой машине, во всех проектах. Продолжить?'
+              : 'This window has no open folder (or scope=global is set), so the stop will be GLOBAL: every Claude Code session on this machine, in every project, will be blocked. Continue?',
+            { modal: true },
+            confirmLabel,
+          );
+          if (picked !== confirmLabel) return;
+        }
         const now = new Date().toISOString();
-        writeStopFlag(activateStopFlag(readStopFlag(), currentCwdFilter(), now));
+        writeStopFlag(activateStopFlag(readStopFlag(), cwds, now));
         void vscode.window.showWarningMessage(
           ru
             ? 'Claude Office: ЭКСТРЕННАЯ ОСТАНОВКА — все вызовы инструментов блокируются. Повторное нажатие или новый промпт снимает её.'
@@ -278,7 +306,7 @@ export function activate(context: vscode.ExtensionContext) {
   });
 
   const emergencyStopCmd = vscode.commands.registerCommand('claudeOffice.emergencyStop', () => {
-    toggleStop();
+    void toggleStop();
   });
 
   const installHooksCmd = vscode.commands.registerCommand('claudeOffice.installHooks', () => {

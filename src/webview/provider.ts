@@ -27,7 +27,10 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
     cost: null,
   };
 
-  constructor(private extensionUri: vscode.Uri) {}
+  constructor(
+    private extensionUri: vscode.Uri,
+    private version: string = '',
+  ) {}
 
   /** Callback invoked when any webview signals it's ready */
   onReady?: () => void;
@@ -43,6 +46,13 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
     const slot: WebviewSlot = { webview: webviewView.webview, ready: false };
     this.viewSlot = slot;
     this.attachWebview(webviewView.webview, slot);
+
+    // Messages posted while the view is hidden can be dropped even with
+    // retainContextWhenHidden, leaving stale UI (e.g. the stop banner after
+    // an auto-release). Replay the cached state whenever it comes back.
+    webviewView.onDidChangeVisibility(() => {
+      if (webviewView.visible && slot.ready) this.replay(slot.webview);
+    });
 
     webviewView.onDidDispose(() => {
       if (this.viewSlot === slot) this.viewSlot = null;
@@ -75,6 +85,10 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
     const slot: WebviewSlot = { webview: panel.webview, ready: false };
     this.panelSlot = slot;
     this.attachWebview(panel.webview, slot);
+
+    panel.onDidChangeViewState(() => {
+      if (panel.visible && slot.ready) this.replay(slot.webview);
+    });
 
     panel.onDidDispose(() => {
       if (this.panelSlot === slot) this.panelSlot = null;
@@ -148,29 +162,34 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
       }
       if (msg.type !== 'webview_ready') return;
       slot.ready = true;
-      if (this.lastState) {
-        webview.postMessage({
-          type: 'full_state',
-          agents: this.lastState,
-          model: this.lastModel,
-          waiting: this.lastWaiting,
-        });
-      }
-      webview.postMessage({ type: 'stop_state', ...this.lastStop });
-      if (this.lastSubscription !== null || this.lastCost !== null) {
-        webview.postMessage({
-          type: 'usage_update',
-          data: { subscription: this.lastSubscription, cost: this.lastCost },
-        });
-      }
-      for (const source of ['subscription', 'cost'] as const) {
-        const message = this.usageErrors[source];
-        if (message) {
-          webview.postMessage({ type: 'usage_error', source, message });
-        }
-      }
+      this.replay(webview);
       this.onReady?.();
     });
+  }
+
+  /** Re-send the full cached state so a (re)shown webview can't stay stale. */
+  private replay(webview: vscode.Webview): void {
+    if (this.lastState) {
+      webview.postMessage({
+        type: 'full_state',
+        agents: this.lastState,
+        model: this.lastModel,
+        waiting: this.lastWaiting,
+      });
+    }
+    webview.postMessage({ type: 'stop_state', ...this.lastStop });
+    if (this.lastSubscription !== null || this.lastCost !== null) {
+      webview.postMessage({
+        type: 'usage_update',
+        data: { subscription: this.lastSubscription, cost: this.lastCost },
+      });
+    }
+    for (const source of ['subscription', 'cost'] as const) {
+      const message = this.usageErrors[source];
+      if (message) {
+        webview.postMessage({ type: 'usage_error', source, message });
+      }
+    }
   }
 
   private broadcast(message: unknown): void {
@@ -207,6 +226,7 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
     html = html.replace(/\{\{nonce\}\}/g, nonce);
     // Resolved UI locale (e.g. "ru-RU") — the webview localizes its chrome from it.
     html = html.replace(/\{\{lang\}\}/g, uiLocale());
+    html = html.replace(/\{\{version\}\}/g, this.version);
 
     return html;
   }

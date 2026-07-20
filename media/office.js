@@ -917,5 +917,10 @@ initTimelineSelector();
 initIdleToggle();
 initStopControls();
 vscode.postMessage({ type: "webview_ready" });
+// A retained-but-hidden webview can miss messages (e.g. the stop-flag
+// auto-release), so ask for a full replay every time we're shown again.
+document.addEventListener("visibilitychange", function() {
+  if (!document.hidden) vscode.postMessage({ type: "webview_ready" });
+});
 setInterval(function() { renderTimeline(); renderMainBanner(); }, 2000); // banner: keep "· Nm" duration fresh
 setInterval(function() { renderUsage(); }, 30000); // keep "resets in …" countdown fresh

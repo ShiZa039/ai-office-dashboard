@@ -65,6 +65,25 @@ export function activateStopFlag(
   return { active: true, cwds: union, since: existing.since || now };
 }
 
+/**
+ * Build the flag after a release from a window covering `cwds` (null/empty =
+ * global scope → release everything). Only the window's own folders are
+ * subtracted; stops set by other windows survive. Returns the remaining flag,
+ * or null when nothing is left and the file should be deleted.
+ */
+export function deactivateStopFlag(
+  existing: StopFlag | null,
+  cwds: string[] | null,
+): StopFlag | null {
+  if (!existing) return null;
+  const ours = cwds ?? [];
+  // A global flag has no per-project parts to subtract — full release.
+  if (existing.cwds.length === 0 || ours.length === 0) return null;
+  const remaining = existing.cwds.filter((c) => !ours.some((o) => pathsOverlap(c, o)));
+  if (remaining.length === 0) return null;
+  return { active: true, cwds: remaining, since: existing.since };
+}
+
 function normPath(p: string): string {
   let n = path.normalize(p);
   while (n.length > 1 && n.endsWith(path.sep)) n = n.slice(0, -1);

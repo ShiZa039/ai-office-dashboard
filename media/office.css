@@ -4,6 +4,12 @@
   box-sizing: border-box;
 }
 
+/* The hidden attribute must always win, even over display:flex rules
+   (the UA's [hidden] style loses to any author display property). */
+[hidden] {
+  display: none !important;
+}
+
 :root {
   --blue: #3b82f6;
   --blue-dim: #1e3a5f;
@@ -770,6 +776,15 @@ body {
   color: var(--text-secondary);
   border-top: 1px solid var(--room-border);
   padding-top: 3px;
+}
+
+.office-version {
+  margin-top: 6px;
+  text-align: right;
+  font-size: 8px;
+  color: var(--text-secondary);
+  opacity: 0.5;
+  user-select: none;
 }
 
 .event-log::-webkit-scrollbar { width: 3px; }

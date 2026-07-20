@@ -78,13 +78,38 @@ def handle_stop_gate():
     }))
 
 def release_stop_flag(cwd):
-    """A new user prompt means "resume": drop the stop flag covering this cwd."""
+    """A new user prompt means "resume" — but only for this cwd.
+
+    Overlapping entries are removed from the flag, stops on other projects
+    survive. A global flag (empty cwds) has no per-project parts, so it is
+    fully released. Keep in sync with emit-agent-event.js.
+    """
     flag = load_stop_flag()
-    if flag and stop_covers_cwd(flag, cwd):
-        try:
+    if not flag:
+        return
+    raw_cwds = flag.get("cwds")
+    cwds = [c for c in raw_cwds if isinstance(c, str) and c] if isinstance(raw_cwds, list) else []
+    remaining = []
+    if cwds:
+        if not isinstance(cwd, str) or not cwd:
+            return  # no cwd info — keep the stop
+        target = os.path.normcase(os.path.normpath(cwd))
+        for base in cwds:
+            b = os.path.normcase(os.path.normpath(base))
+            if target == b or target.startswith(b + os.sep) or b.startswith(target + os.sep):
+                continue
+            remaining.append(base)
+        if len(remaining) == len(cwds):
+            return  # prompt from an uncovered project
+    try:
+        if remaining:
+            flag["cwds"] = remaining
+            with open(stop_flag_path(), "w", encoding="utf-8") as f:
+                json.dump(flag, f, indent=2)
+        else:
             os.remove(stop_flag_path())
-        except OSError:
-            pass
+    except OSError:
+        pass
 
 def resolve_model(data):
     """Best-effort model ID for the session.

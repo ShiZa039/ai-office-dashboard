@@ -1,6 +1,12 @@
 import * as assert from 'assert';
 import * as path from 'path';
-import { activateStopFlag, parseStopFlag, stopAppliesToWindow, StopFlag } from '../src/stopFlag';
+import {
+  activateStopFlag,
+  deactivateStopFlag,
+  parseStopFlag,
+  stopAppliesToWindow,
+  StopFlag,
+} from '../src/stopFlag';
 
 // --- parseStopFlag ---
 
@@ -56,11 +62,58 @@ const NOW = '2026-07-14T12:00:00.000Z';
   assert.deepStrictEqual(flag.cwds, [], 'new global stop widens a workspace stop');
 }
 
-// --- stopAppliesToWindow ---
+// --- deactivateStopFlag ---
 
 const A = path.join(path.sep, 'proj', 'a');
 const A_SUB = path.join(A, 'packages', 'core');
 const B = path.join(path.sep, 'proj', 'b');
+
+assert.strictEqual(deactivateStopFlag(null, [A]), null, 'no flag → nothing to release');
+
+{
+  const existing: StopFlag = { active: true, cwds: [A, B], since: 'T0' };
+  const flag = deactivateStopFlag(existing, [A]);
+  assert.deepStrictEqual(
+    flag,
+    { active: true, cwds: [B], since: 'T0' },
+    'only own project released, other window stop survives',
+  );
+}
+
+{
+  const existing: StopFlag = { active: true, cwds: [A, B], since: 'T0' };
+  assert.strictEqual(
+    deactivateStopFlag(existing, [A, B]),
+    null,
+    'all covered projects released → flag gone',
+  );
+}
+
+{
+  const existing: StopFlag = { active: true, cwds: [A_SUB, B], since: 'T0' };
+  const flag = deactivateStopFlag(existing, [A]);
+  assert.deepStrictEqual(flag!.cwds, [B], 'overlap by containment counts as ours');
+}
+
+{
+  const existing: StopFlag = { active: true, cwds: [], since: 'T0' };
+  assert.strictEqual(
+    deactivateStopFlag(existing, [A]),
+    null,
+    'global flag released entirely by any window',
+  );
+}
+
+{
+  const existing: StopFlag = { active: true, cwds: [A, B], since: 'T0' };
+  assert.strictEqual(
+    deactivateStopFlag(existing, null),
+    null,
+    'global-scope window releases everything',
+  );
+}
+
+// --- stopAppliesToWindow ---
 
 assert.strictEqual(stopAppliesToWindow(null, [A]), false, 'no flag → not stopped');
 assert.strictEqual(

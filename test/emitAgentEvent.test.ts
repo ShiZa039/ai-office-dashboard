@@ -177,5 +177,27 @@ assert.ok(fs.existsSync(stopFlagFile), 'prompt in another project keeps the flag
 runHook('user_prompt', { session_id: 'S1', cwd: '/p' });
 assert.ok(!fs.existsSync(stopFlagFile), 'prompt in the stopped project releases the flag');
 
+// --- user_prompt releases only its own project, stops elsewhere survive ---
+
+fs.writeFileSync(
+  stopFlagFile,
+  JSON.stringify({ active: true, cwds: ['/p', '/q'], since: 'T0' }),
+  'utf-8',
+);
+runHook('user_prompt', { session_id: 'S1', cwd: path.join('/p', 'sub') });
+{
+  const flag = JSON.parse(fs.readFileSync(stopFlagFile, 'utf-8'));
+  assert.deepStrictEqual(flag.cwds, ['/q'], 'own project removed, other project still stopped');
+  assert.strictEqual(flag.active, true, 'flag stays active for the rest');
+}
+runHook('user_prompt', { session_id: 'S1', cwd: '/q' });
+assert.ok(!fs.existsSync(stopFlagFile), 'last covered project released → flag file gone');
+
+// --- global flag: any prompt releases it entirely ---
+
+fs.writeFileSync(stopFlagFile, JSON.stringify({ active: true, cwds: [] }), 'utf-8');
+runHook('user_prompt', { session_id: 'S1', cwd: '/anywhere' });
+assert.ok(!fs.existsSync(stopFlagFile), 'global stop released by any prompt');
+
 fs.rmSync(home, { recursive: true, force: true });
 console.log('All emitAgentEvent tests passed.');
