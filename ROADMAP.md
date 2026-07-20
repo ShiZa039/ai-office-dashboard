@@ -205,8 +205,11 @@
 ### v1.0 — стабильность
 
 - [x] Документация на английском (для Marketplace) — README.md / INSTALL.md переведены, русские версии в `*.ru.md` с переключателем языка (2026-07-20).
-- [ ] CI: GitHub Actions запускает `npm test` на push/PR.
-- [ ] Smoke-тест: vsce package + установка в headless VSCode.
+- [x] CI: GitHub Actions — lint + `npm test` (ubuntu/windows) + smoke-сборка `vsce package` с артефактом `.vsix` (2026-07-20).
+- [x] Бандлинг esbuild: `vscode:prepublish` собирает один минифицированный `out/src/extension.js`, из `out/` в пакет идёт только он (2026-07-20).
+- [x] Локализация package.json (`package.nls.json` / `package.nls.ru.json`): команды и описания настроек en/ru в UI VSCode (2026-07-20).
+- [x] ESLint-конфиг (`.eslintrc.json`) — `npm run lint` раньше падал без конфигурации; сейчас проходит чисто (2026-07-20).
+- [ ] Smoke-тест: установка `.vsix` в headless VSCode.
 - [ ] Покрытие тестами `eventWatcher.ts` (сейчас не покрыт — fs.watch сложно мокать).
 
 ### Идеи на потом

@@ -1,8 +1,9 @@
 .gitignore
 .git/**
+.github/**
+.eslintrc.json
 src/**
 test/**
-out/test/**
 node_modules/**
 hooks/__pycache__/**
 ROADMAP.md
@@ -12,4 +13,5 @@ tsconfig.json
 *.orig
 **/*.orig
 *.map
-out/**/*.map
+out/**
+!out/src/extension.js
