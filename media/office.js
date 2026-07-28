@@ -6,18 +6,32 @@ var eventCount = 0;
 var completedCount = 0;
 var timelineEvents = [];
 var agentRoomCache = {};
-var TIMELINE_WINDOW_KEY = "claudeOffice.timelineWindowMs";
+var TIMELINE_WINDOW_KEY = "aiOffice.timelineWindowMs";
 var currentTimelineMs = 5 * 60 * 1000;
 var lastUsage = null;
 var currentWaiting = null;
 var stopActive = false;
 // The main chat model is visualized by the top banner, not a room figure.
-var MAIN_AGENT = "Claude (main)";
+var MAIN_AGENT = "Main agent";
 var mainWorkingSince = null;
-var HIDE_IDLE_KEY = "claudeOffice.hideIdleAgents";
+var HIDE_IDLE_KEY = "aiOffice.hideIdleAgents";
 var hideIdle = true;
+
+// Storage keys moved from "claudeOffice.*" to "aiOffice.*" with the rebrand —
+// adopt the old value once (copy it under the new key), then drop the old key.
+function readStorageKey(newKey, oldKey) {
+  var v = localStorage.getItem(newKey);
+  if (v === null) {
+    v = localStorage.getItem(oldKey);
+    if (v !== null) {
+      try { localStorage.setItem(newKey, v); localStorage.removeItem(oldKey); } catch(e) {}
+    }
+  }
+  return v;
+}
+
 try {
-  var savedHideIdle = localStorage.getItem(HIDE_IDLE_KEY);
+  var savedHideIdle = readStorageKey(HIDE_IDLE_KEY, "claudeOffice.hideIdleAgents");
   if (savedHideIdle !== null) hideIdle = savedHideIdle === "1";
 } catch(e) { /* localStorage unavailable */ }
 
@@ -74,11 +88,11 @@ try { new Date().toLocaleTimeString(UI_LOCALE); TIME_LOCALE = UI_LOCALE; } catch
 var MESSAGES = {
   en: {
     waitingForYou: "waiting for you",
-    claudeWaiting: "Claude is waiting for you",
-    claudeWorking: "Claude is working",
-    claudeFinished: "Claude finished the turn",
+    agentWaiting: "The agent is waiting for you",
+    agentWorking: "The agent is working",
+    agentFinished: "The agent finished the turn",
     statusActive: "{n} active",
-    statusClaudeWorking: "Claude working",
+    statusAgentWorking: "Agent working",
     statusIdle: "idle",
     statusOffline: "offline",
     events: ["event", "events"],
@@ -86,7 +100,7 @@ var MESSAGES = {
     idleTitleCollapsed: "Idle agents are collapsed into per-room “+N” chips. Click to show them.",
     idleTitleExpanded: "Click to collapse idle agents into per-room “+N” chips.",
     waitingForEvents: "waiting for events...",
-    floorEmpty: "No agents in this project yet — rooms appear as Claude Code works here",
+    floorEmpty: "No agents in this project yet — rooms appear as agents work here",
     resetsSoon: "resets soon",
     resetsIn: "resets in {d}",
     updatedAt: "updated {t}",
@@ -110,7 +124,7 @@ var MESSAGES = {
     labelWeeklyOpus: "Weekly Opus ($)",
     tl5: "5 min", tl15: "15 min", tl30: "30 min", tl1h: "1 hour", tl6h: "6 hours",
     stopActive: "Emergency stop is active",
-    stopHint: "All agent tool calls are blocked. Press Resume or just send Claude a new prompt.",
+    stopHint: "All agent tool calls are blocked. Press Resume or just send the agent a new prompt.",
     stopResume: "Resume",
     stopBtnLabel: "Emergency stop",
     stopBtnHint: "Block all agent tool calls immediately",
@@ -120,11 +134,11 @@ var MESSAGES = {
   },
   ru: {
     waitingForYou: "ждёт вашего ответа",
-    claudeWaiting: "Claude ждёт вас",
-    claudeWorking: "Claude работает",
-    claudeFinished: "Claude завершил ход",
+    agentWaiting: "Агент ждёт вас",
+    agentWorking: "Агент работает",
+    agentFinished: "Агент завершил ход",
     statusActive: "{n} активно",
-    statusClaudeWorking: "Claude работает",
+    statusAgentWorking: "Агент работает",
     statusIdle: "без задач",
     statusOffline: "офлайн",
     events: ["событие", "события", "событий"],
@@ -132,7 +146,7 @@ var MESSAGES = {
     idleTitleCollapsed: "Неактивные агенты свёрнуты в чипы «+N» по комнатам. Нажмите, чтобы показать их.",
     idleTitleExpanded: "Нажмите, чтобы свернуть неактивных агентов в чипы «+N» по комнатам.",
     waitingForEvents: "ожидание событий...",
-    floorEmpty: "В этом проекте пока нет агентов — комнаты появятся, когда Claude Code начнёт здесь работать",
+    floorEmpty: "В этом проекте пока нет агентов — комнаты появятся, когда агенты начнут здесь работать",
     resetsSoon: "скоро сброс",
     resetsIn: "сброс через {d}",
     updatedAt: "обновлено {t}",
@@ -156,7 +170,7 @@ var MESSAGES = {
     labelWeeklyOpus: "Opus за неделю ($)",
     tl5: "5 мин", tl15: "15 мин", tl30: "30 мин", tl1h: "1 час", tl6h: "6 часов",
     stopActive: "Экстренная остановка активна",
-    stopHint: "Все вызовы инструментов агентов блокируются. Нажмите «Продолжить» или просто отправьте Claude новый промпт.",
+    stopHint: "Все вызовы инструментов агентов блокируются. Нажмите «Продолжить» или просто отправьте агенту новый промпт.",
     stopResume: "Продолжить",
     stopBtnLabel: "Экстренная остановка",
     stopBtnHint: "Мгновенно заблокировать все действия агентов",
@@ -429,7 +443,7 @@ function render() {
   var mainAgent = currentAgents[MAIN_AGENT];
   if (currentWaiting) setStatus("status-dot--wait", tr("waitingForYou"));
   else if (working > 0) setStatus("status-dot--on", tr("statusActive", { n: working }));
-  else if (mainAgent && mainAgent.state === "working") setStatus("status-dot--on", tr("statusClaudeWorking"));
+  else if (mainAgent && mainAgent.state === "working") setStatus("status-dot--on", tr("statusAgentWorking"));
   else if (total > 0) setStatus("status-dot--off", tr("statusIdle"));
   else setStatus("status-dot--off", tr("statusOffline"));
 
@@ -454,7 +468,7 @@ function renderMainBanner() {
 
   if (currentWaiting) {
     if (iconEl) iconEl.textContent = "✋";
-    if (titleEl) titleEl.textContent = tr("claudeWaiting");
+    if (titleEl) titleEl.textContent = tr("agentWaiting");
     if (msgEl) msgEl.textContent = currentWaiting.message || "";
     banner.hidden = false;
     return;
@@ -464,7 +478,7 @@ function renderMainBanner() {
     if (!mainWorkingSince) mainWorkingSince = Date.now();
     banner.classList.add("waiting-banner--working");
     if (iconEl) iconEl.textContent = "⚡";
-    var title = tr("claudeWorking");
+    var title = tr("agentWorking");
     if (main.activeCount > 1) title += " ×" + main.activeCount;
     var mins = (Date.now() - mainWorkingSince) / 60000;
     if (mins >= 1) title += " · " + formatDuration(mins);
@@ -478,7 +492,7 @@ function renderMainBanner() {
   if (main && main.state === "done") {
     banner.classList.add("waiting-banner--done");
     if (iconEl) iconEl.textContent = "✓";
-    if (titleEl) titleEl.textContent = tr("claudeFinished");
+    if (titleEl) titleEl.textContent = tr("agentFinished");
     if (msgEl) msgEl.textContent = "";
     banner.hidden = false;
     return;
@@ -577,7 +591,7 @@ function addLogEntry(agent, event, task, room) {
 
   var isStart = event === "agent_start";
   var isError = event === "agent_stop" && task === "ERROR";
-  var isMain = agent === "Claude (main)";
+  var isMain = agent === MAIN_AGENT;
   var cls = isStart ? "start" : isError ? "error" : "stop";
   var arrow = isStart ? "▶" : isError ? "✖" : "✔";
   var label = task && task !== "ERROR" ? shortName(agent) + ": " + task : shortName(agent);
@@ -674,7 +688,9 @@ window.addEventListener("message", function(evt) { // noqa: secret
     render();
   } else if (msg.type === "usage_update") {
     lastUsage = msg.data;
-    recordUsageSamples(msg.data && msg.data.subscription);
+    var subs = (msg.data && msg.data.subscription) || {};
+    recordUsageSamples(subs.claude, "claude:");
+    recordUsageSamples(subs.kimi, "kimi:");
     renderUsage();
   } else if (msg.type === "usage_error") {
     renderUsageError(msg.source, msg.message);
@@ -690,7 +706,7 @@ function initTimelineSelector() {
   var sel = document.getElementById("timeline-window");
   if (!sel) return;
   try {
-    var saved = localStorage.getItem(TIMELINE_WINDOW_KEY);
+    var saved = readStorageKey(TIMELINE_WINDOW_KEY, "claudeOffice.timelineWindowMs");
     if (saved) {
       var n = parseInt(saved, 10);
       if (!isNaN(n) && n > 0) currentTimelineMs = n;
@@ -743,12 +759,16 @@ function updateBar(kind, cost, limit, subtitle) {
   fillBar(document.querySelector('.usage-bar[data-kind="' + kind + '"]'), pct, txt);
 }
 
-/** Keep #usage-subscription bar elements in sync with the reported limit kinds. */
-function ensureSubscriptionBars(section, limits) {
-  var wantKinds = limits.map(function(l) { return l.kind; }).join("|");
+/** Keep a usage group's caption + bar elements in sync with the reported limit kinds. */
+function ensureSubscriptionBars(section, limits, caption) {
+  var wantKinds = caption + "|" + limits.map(function(l) { return l.kind; }).join("|");
   if (section.getAttribute("data-kinds") === wantKinds) return;
   section.setAttribute("data-kinds", wantKinds);
   section.textContent = "";
+  var cap = document.createElement("div");
+  cap.className = "usage-group-caption";
+  cap.textContent = caption;
+  section.appendChild(cap);
   for (var i = 0; i < limits.length; i++) {
     var bar = document.createElement("div");
     bar.className = "usage-bar";
@@ -790,23 +810,24 @@ function resetText(resetsAt) {
 // Keeps a rolling window of utilization samples per limit kind and projects
 // when the limit hits 100% at the current pace. Persisted in localStorage so
 // webview reloads don't lose the trend.
-var USAGE_HISTORY_KEY = "claudeOffice.usageHistory";
+var USAGE_HISTORY_KEY = "aiOffice.usageHistory";
 var USAGE_HISTORY_WINDOW_MS = 90 * 60000;
 var USAGE_FORECAST_MIN_SPAN_MS = 10 * 60000;
 var usageHistory = {}; // kind -> [{t, pct}]
 try {
-  var savedHist = localStorage.getItem(USAGE_HISTORY_KEY);
+  var savedHist = readStorageKey(USAGE_HISTORY_KEY, "claudeOffice.usageHistory");
   if (savedHist) usageHistory = JSON.parse(savedHist) || {};
 } catch(e) { usageHistory = {}; }
 
-function recordUsageSamples(sub) {
+function recordUsageSamples(sub, prefix) {
   if (!sub || !sub.limits) return;
   var t = Date.parse(sub.fetchedAt || "");
   if (isNaN(t)) return;
   var changed = false;
   for (var i = 0; i < sub.limits.length; i++) {
     var lim = sub.limits[i];
-    var arr = usageHistory[lim.kind] || (usageHistory[lim.kind] = []);
+    var key = prefix + lim.kind; // kinds repeat across providers ("session", "weekly")
+    var arr = usageHistory[key] || (usageHistory[key] = []);
     var last = arr[arr.length - 1];
     if (last && last.t >= t) continue; // same snapshot re-broadcast
     // A big utilization drop means the window reset — old trend is meaningless.
@@ -821,8 +842,8 @@ function recordUsageSamples(sub) {
 }
 
 /** Projected epoch-ms when this limit hits 100%, or null if not burning. */
-function forecastLimit(lim) {
-  var arr = usageHistory[lim.kind];
+function forecastLimit(lim, historyKey) {
+  var arr = usageHistory[historyKey];
   if (!arr || arr.length < 2) return null;
   var first = arr[0], last = arr[arr.length - 1];
   var span = last.t - first.t;
@@ -832,18 +853,26 @@ function forecastLimit(lim) {
   return last.t + (100 - last.pct) / rate;
 }
 
-function renderForecast(sub) {
+function renderForecast(subs) {
   var el = document.getElementById("usage-forecast");
   if (!el) return;
   var worst = null;
-  if (sub && sub.limits) {
+  var providers = [
+    { snap: subs && subs.claude, prefix: "claude:", name: "Claude Code" },
+    { snap: subs && subs.kimi, prefix: "kimi:", name: "Kimi Code" },
+  ];
+  for (var p = 0; p < providers.length; p++) {
+    var sub = providers[p].snap;
+    if (!sub || !sub.limits) continue;
     for (var i = 0; i < sub.limits.length; i++) {
       var lim = sub.limits[i];
-      var hitAt = forecastLimit(lim);
+      var hitAt = forecastLimit(lim, providers[p].prefix + lim.kind);
       if (hitAt == null) continue;
       var resetAt = lim.resetsAt ? Date.parse(lim.resetsAt) : NaN;
       if (!isNaN(resetAt) && hitAt >= resetAt) continue; // window resets first — safe
-      if (!worst || hitAt < worst.hitAt) worst = { label: lim.label, hitAt: hitAt };
+      if (!worst || hitAt < worst.hitAt) {
+        worst = { label: providers[p].name + " " + lim.label, hitAt: hitAt };
+      }
     }
   }
   var mins = worst ? (worst.hitAt - Date.now()) / 60000 : 0;
@@ -856,38 +885,45 @@ function renderForecast(sub) {
   el.hidden = false;
 }
 
+/** Render one provider's subscription section; returns fetchedAt for the "updated" line. */
+function renderSubSection(sectionId, sub, providerName) {
+  var section = document.getElementById(sectionId);
+  if (!(section instanceof HTMLElement)) return null;
+  if (!sub || !sub.limits || sub.limits.length === 0) {
+    section.hidden = true;
+    return null;
+  }
+  section.hidden = false;
+  var caption = providerName;
+  var plan = planLabel(sub.plan);
+  if (plan) caption += "  \u00b7  " + plan;
+  ensureSubscriptionBars(section, sub.limits, caption);
+  for (var i = 0; i < sub.limits.length; i++) {
+    var lim = sub.limits[i];
+    var bar = section.querySelector('.usage-bar[data-kind="' + lim.kind + '"]');
+    if (!bar) continue;
+    var labelEl = bar.querySelector(".usage-bar-label");
+    if (labelEl) labelEl.textContent = lim.label;
+    var txt = lim.utilization.toFixed(0) + "%";
+    var reset = resetText(lim.resetsAt);
+    if (reset) txt += "  \u00b7  " + reset;
+    fillBar(bar, lim.utilization, txt);
+  }
+  return sub.fetchedAt || null;
+}
+
 function renderUsage() {
   if (!lastUsage) return;
-  var sub = lastUsage.subscription;
+  var subs = lastUsage.subscription || {};
   var cost = lastUsage.cost;
 
-  var subSection = document.getElementById("usage-subscription");
   var costSection = document.getElementById("usage-cost");
-  var planEl = document.getElementById("usage-plan");
   var upd = document.getElementById("usage-updated");
 
-  if (sub && sub.limits && sub.limits.length > 0 && subSection instanceof HTMLElement) {
-    subSection.hidden = false;
-    if (planEl instanceof HTMLElement) {
-      var label = planLabel(sub.plan);
-      planEl.hidden = !label;
-      planEl.textContent = label;
-    }
-    ensureSubscriptionBars(subSection, sub.limits);
-    for (var i = 0; i < sub.limits.length; i++) {
-      var lim = sub.limits[i];
-      var bar = subSection.querySelector('.usage-bar[data-kind="' + lim.kind + '"]');
-      if (!bar) continue;
-      var labelEl = bar.querySelector(".usage-bar-label");
-      if (labelEl) labelEl.textContent = lim.label;
-      var txt = lim.utilization.toFixed(0) + "%";
-      var reset = resetText(lim.resetsAt);
-      if (reset) txt += "  \u00b7  " + reset;
-      fillBar(bar, lim.utilization, txt);
-    }
-    if (upd) upd.textContent = tr("updatedAt", { t: formatTime(sub.fetchedAt) });
-  }
-  renderForecast(sub);
+  var fetched = renderSubSection("usage-subscription", subs.claude, "Claude Code");
+  var kimiFetched = renderSubSection("usage-kimi", subs.kimi, "Kimi Code");
+  if (kimiFetched && (!fetched || kimiFetched > fetched)) fetched = kimiFetched;
+  renderForecast(subs);
 
   if (cost) {
     if (costSection instanceof HTMLElement) costSection.hidden = false;
@@ -902,15 +938,19 @@ function renderUsage() {
     updateBar("block", cost.block ? cost.block.costUSD : 0, cost.limits.block, blockSubtitle);
     updateBar("weekly", cost.weekly ? cost.weekly.totalCost : 0, cost.limits.weekly, "");
     updateBar("weekly-opus", cost.weekly ? cost.weekly.opusCost : 0, cost.limits.weeklyOpus, "");
-    if (!sub && upd) upd.textContent = tr("updatedAt", { t: formatTime(cost.fetchedAt) });
+    if (upd) upd.textContent = tr("updatedAt", { t: formatTime(fetched || cost.fetchedAt) });
   } else if (costSection instanceof HTMLElement) {
     costSection.hidden = true;
+    if (upd && fetched) upd.textContent = tr("updatedAt", { t: formatTime(fetched) });
   }
 }
 
 function renderUsageError(source, message) {
-  // Don't let a cost-source hiccup wipe live subscription data (and vice versa).
-  if (lastUsage && lastUsage.subscription && source === "cost") return;
+  // Don't let one provider's hiccup wipe live data from the others.
+  var subs = (lastUsage && lastUsage.subscription) || {};
+  if (source === "cost") {
+    if (subs.claude || subs.kimi || (lastUsage && lastUsage.cost)) return;
+  } else if (subs[source]) return;
   var upd = document.getElementById("usage-updated");
   if (upd) upd.textContent = tr("usageError", { m: message });
 }

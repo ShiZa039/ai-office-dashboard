@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+#
+# Local hook for the ai-office-dashboard project.
+# Prevents accidentally merging the `kimi-code` branch into `master`.
+
+set -euo pipefail
+
+commit_msg_file="$1"
+current_branch=$(git branch --show-current)
+
+if [ "$current_branch" = "master" ]; then
+    if grep -qE "^Merge branch 'kimi-code'" "$commit_msg_file" 2>/dev/null; then
+        echo "ERROR: Merging 'kimi-code' into 'master' is not allowed." >&2
+        echo "       Use a separate branch or keep 'kimi-code' independent." >&2
+        exit 1
+    fi
+fi
+
+exit 0

@@ -1,5 +1,5 @@
 /**
- * Pure logic for registering Claude Office hooks in ~/.claude/settings.json.
+ * Pure logic for registering AI Office hooks in ~/.claude/settings.json.
  * No vscode imports — unit-testable. Filesystem/UI glue lives in hookInstaller.ts.
  */
 

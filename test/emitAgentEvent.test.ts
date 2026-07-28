@@ -128,13 +128,17 @@ function runGate(payload: Record<string, unknown>): string {
   return r.stdout.trim();
 }
 
-// --- no flag file: gate allows silently and writes no event ---
+// --- no flag file: gate allows and records a tool_activity event ---
 
-const eventsBefore = fs.readFileSync(eventsFile, 'utf-8');
 assert.strictEqual(runGate({ session_id: 'S1', cwd: '/p' }), '', 'no flag → no output');
-assert.strictEqual(fs.readFileSync(eventsFile, 'utf-8'), eventsBefore, 'gate never appends events');
+{
+  const e = lastEvent();
+  assert.strictEqual(e.event, 'tool_activity', 'allowed call appends tool_activity');
+  assert.strictEqual(e.session, 'S1');
+  assert.strictEqual(e.cwd, '/p');
+}
 
-// --- active flag covering the cwd: gate denies the tool call ---
+// --- active flag covering the cwd: gate denies the tool call, no activity ---
 
 fs.writeFileSync(
   stopFlagFile,
@@ -142,6 +146,7 @@ fs.writeFileSync(
   'utf-8',
 );
 {
+  const eventsBefore = fs.readFileSync(eventsFile, 'utf-8');
   const out = runGate({ session_id: 'S1', cwd: path.join('/p', 'sub') });
   const decision = JSON.parse(out);
   assert.strictEqual(
@@ -150,11 +155,17 @@ fs.writeFileSync(
     'covered cwd (subdir) is denied',
   );
   assert.ok(decision.hookSpecificOutput.permissionDecisionReason.includes('EMERGENCY STOP'));
+  assert.strictEqual(
+    fs.readFileSync(eventsFile, 'utf-8'),
+    eventsBefore,
+    'denied call appends no activity',
+  );
 }
 
-// --- active flag for another project: gate allows ---
+// --- active flag for another project: gate allows (and records activity) ---
 
 assert.strictEqual(runGate({ session_id: 'S1', cwd: '/other' }), '', 'uncovered cwd passes');
+assert.strictEqual(lastEvent().event, 'tool_activity', 'allowed call still appends activity');
 
 // --- inactive flag: gate allows ---
 
@@ -229,6 +240,147 @@ assert.ok(!fs.existsSync(stopFlagFile), 'human prompt mentioning marker mid-text
 fs.writeFileSync(stopFlagFile, JSON.stringify({ active: true, cwds: ['/p'] }), 'utf-8');
 runHook('user_prompt', { session_id: 'S1', cwd: '/p' });
 assert.ok(!fs.existsSync(stopFlagFile), 'missing prompt field → release (backward compatible)');
+
+// ══ Kimi Code mode (argv[3] = 'kimi') ══
+// Payloads use the kimi-code snake_case fields (agent_name + prompt/response,
+// tool_name for permission waits) and carry no model/transcript — the model
+// falls back to default_model in ~/.kimi-code/config.toml.
+
+const kimiHome = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-office-kimi-test-'));
+const kimiEventsFile = path.join(kimiHome, '.claude', 'agent-events.jsonl');
+const kimiStopFlagFile = path.join(kimiHome, '.kimi-code', 'office-stop.json');
+const claudeFlagInKimiHome = path.join(kimiHome, '.claude', 'office-stop.json');
+
+fs.mkdirSync(path.join(kimiHome, '.kimi-code'), { recursive: true });
+fs.writeFileSync(
+  path.join(kimiHome, '.kimi-code', 'config.toml'),
+  'default_model = "kimi-code/k3"\n\n[providers.kimi]\nmodel = "kimi-for-coding"\n',
+  'utf-8',
+);
+
+function runKimiHook(arg: string, payload: Record<string, unknown>): void {
+  const r = spawnSync(process.execPath, [script, arg, 'kimi'], {
+    input: JSON.stringify(payload),
+    encoding: 'utf-8',
+    env: { ...process.env, USERPROFILE: kimiHome, HOME: kimiHome },
+  });
+  assert.strictEqual(r.status, 0, `kimi hook exited 0 for ${arg}: ${r.stderr}`);
+}
+
+function runKimiGate(payload: Record<string, unknown>): string {
+  const r = spawnSync(process.execPath, [script, 'stop_gate', 'kimi'], {
+    input: JSON.stringify(payload),
+    encoding: 'utf-8',
+    env: { ...process.env, USERPROFILE: kimiHome, HOME: kimiHome },
+  });
+  assert.strictEqual(r.status, 0, `kimi stop_gate exited 0: ${r.stderr}`);
+  return r.stdout.trim();
+}
+
+function lastKimiEvent(): Record<string, unknown> {
+  const lines = fs.readFileSync(kimiEventsFile, 'utf-8').trim().split('\n');
+  return JSON.parse(lines[lines.length - 1]);
+}
+
+// --- session_start: model from default_model in ~/.kimi-code/config.toml ---
+
+runKimiHook('session_start', { session_id: 'K1', cwd: '/p', source: 'startup' });
+{
+  const e = lastKimiEvent();
+  assert.strictEqual(e.event, 'session_start');
+  assert.strictEqual(e.model, 'kimi-code/k3', 'model read from config.toml default_model');
+}
+
+// --- agent_start: agent_name + delegated prompt as the task label ---
+
+runKimiHook('agent_start', {
+  session_id: 'K1',
+  cwd: '/p',
+  agent_name: 'explore',
+  prompt: 'Map out the relevant files before making changes',
+});
+{
+  const e = lastKimiEvent();
+  assert.strictEqual(e.agent, 'explore');
+  assert.strictEqual(e.task, 'Map out the relevant files before making changes');
+}
+
+// --- agent_stop: response preview as the task label ---
+
+runKimiHook('agent_stop', {
+  session_id: 'K1',
+  cwd: '/p',
+  agent_name: 'explore',
+  response: 'Found 3 relevant files under src/',
+});
+{
+  const e = lastKimiEvent();
+  assert.strictEqual(e.agent, 'explore');
+  assert.strictEqual(e.task, 'Found 3 relevant files under src/');
+  assert.strictEqual(e.result, 'success');
+}
+
+// --- agent_waiting: PermissionRequest tool_name builds the message ---
+
+runKimiHook('agent_waiting', { session_id: 'K1', cwd: '/p', tool_name: 'Bash' });
+{
+  const e = lastKimiEvent();
+  assert.strictEqual(e.event, 'agent_waiting');
+  assert.strictEqual(e.task, 'Kimi needs your permission to use Bash');
+}
+
+// --- stop_gate: kimi mode reads ~/.kimi-code/office-stop.json, not ~/.claude ---
+
+fs.writeFileSync(
+  claudeFlagInKimiHome,
+  JSON.stringify({ active: true, cwds: [] }),
+  'utf-8',
+);
+assert.strictEqual(
+  runKimiGate({ session_id: 'K1', cwd: '/p' }),
+  '',
+  'claude flag does not gate kimi tool calls',
+);
+fs.rmSync(claudeFlagInKimiHome);
+
+fs.mkdirSync(path.dirname(kimiStopFlagFile), { recursive: true });
+fs.writeFileSync(
+  kimiStopFlagFile,
+  JSON.stringify({ active: true, cwds: ['/p'], since: '2026-07-27T10:00:00Z' }),
+  'utf-8',
+);
+{
+  const decision = JSON.parse(runKimiGate({ session_id: 'K1', cwd: path.join('/p', 'sub') }));
+  assert.strictEqual(
+    decision.hookSpecificOutput.permissionDecision,
+    'deny',
+    'kimi flag gates kimi tool calls',
+  );
+  assert.strictEqual(runKimiGate({ session_id: 'K1', cwd: '/other' }), '', 'uncovered cwd passes');
+}
+
+// --- user_prompt in kimi mode releases BOTH cli flag files ---
+
+fs.writeFileSync(
+  claudeFlagInKimiHome,
+  JSON.stringify({ active: true, cwds: ['/p'] }),
+  'utf-8',
+);
+runKimiHook('user_prompt', { session_id: 'K1', cwd: '/p', prompt: 'resume please' });
+assert.ok(!fs.existsSync(kimiStopFlagFile), 'kimi flag released by human prompt');
+assert.ok(!fs.existsSync(claudeFlagInKimiHome), 'claude flag released by the same prompt');
+
+// --- kimi cron-fire prompts must NOT release the stop ---
+
+fs.writeFileSync(kimiStopFlagFile, JSON.stringify({ active: true, cwds: ['/p'] }), 'utf-8');
+runKimiHook('user_prompt', {
+  session_id: 'K1',
+  cwd: '/p',
+  prompt: '<cron-fire jobId="abc" cron="*/5 * * * *">\n<prompt>check the build</prompt>\n</cron-fire>',
+});
+assert.ok(fs.existsSync(kimiStopFlagFile), 'cron-fire prompt keeps the stop');
+
+fs.rmSync(kimiHome, { recursive: true, force: true });
 
 fs.rmSync(home, { recursive: true, force: true });
 console.log('All emitAgentEvent tests passed.');

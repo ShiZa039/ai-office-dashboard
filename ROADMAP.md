@@ -1,6 +1,6 @@
-# Roadmap — Claude Office Dashboard
+# Roadmap — AI Office
 
-История релизов и план развития. Текущая версия — `v0.13.2`.
+История релизов и план развития. Текущая версия — `v0.14.0`.
 
 > This file is maintained in Russian only (internal dev history). User-facing docs are bilingual: [README.md](README.md) / [README.ru.md](README.ru.md), [INSTALL.md](INSTALL.md) / [INSTALL.ru.md](INSTALL.ru.md).
 
@@ -183,24 +183,54 @@
   автоматикой не считается
 - Тесты: сценарии автоматических промптов в `emitAgentEvent.test.ts`
 
+### v0.14.0 — ребрендинг в AI Office + поддержка Kimi Code CLI (dual CLI)
+- Ребрендинг: расширение переименовано в **AI Office** (id `ai-office-dashboard`),
+  репозиторий — `github.com/ShiZa039/ai-office-dashboard`; команды и настройки
+  `claudeOffice.*` → `aiOffice.*` (старые ключи оставлены deprecated, значения
+  мигрируют автоматически при первом запуске; пользовательские кейбиндинги на
+  `claudeOffice.*` обновляются вручную); команда «Install Claude Code Hooks» →
+  «AI Office: Install Agent Hooks»; главный псевдо-агент «Claude (main)» → «Main agent»;
+  суффикс бэкапа хук-инсталлера `.claude-office.bak` → `.ai-office.bak`
+- Фикс залипания баннера «агент ждёт вас»: stop_gate (PreToolUse) в разрешающей
+  ветке дописывает лёгкое событие `tool_activity` — первый вызов инструмента
+  после ответа на permission-промпт (например, апрув выхода из планмода)
+  снимает баннер, не дожидаясь конца хода
+- Двойная поддержка агентских CLI: Claude Code и Kimi Code одновременно
+- Установка хуков в оба CLI: Claude — как раньше (`~/.claude/hooks/` + merge в
+  `~/.claude/settings.json`, бэкап `settings.json.ai-office.bak`); Kimi — скрипты в
+  `~/.kimi-code/hooks/`, блоки `[[hooks]]` в `~/.kimi-code/config.toml` с комментарием-маяком
+  `# office-dashboard-hook: <Event>`, бэкап `config.toml.office-dashboard.bak`
+- Настройка `aiOffice.hooks.targets`: `auto` (по умолчанию — все CLI, чья домашняя
+  директория существует: `~/.claude` / `~/.kimi-code`; если нет ни одной — оба) /
+  `claude` / `kimi` / `both`; команда Install Hooks ставит во все выбранные цели
+- Маппинг событий Kimi: `SessionStart`→session_start, `SubagentStart`→agent_start
+  (в `task` — текст делегированного prompt), `SubagentStop`→agent_stop (task = превью
+  ответа), `Stop`→session_stop, `PermissionRequest`→agent_waiting (аналог клодовского
+  Notification), `UserPromptSubmit`→user_prompt, `PreToolUse`→stop_gate
+- Экстренная остановка пишет два флага: `~/.claude/office-stop.json` и
+  `~/.kimi-code/office-stop.json` — кнопка останавливает оба CLI разом; человеческий
+  промпт в любом из CLI снимает остановку в обоих (хук-скрипты зеркалят release на оба
+  файла), автоматические промпты (cron-fire, system-reminder, task-notification) — нет
+- Хук-скрипт принимает второй аргумент CLI: `emit-agent-event.js <event_type> [claude|kimi]`
+- Ростер: сканируются `.claude/agents/`, `.kimi-code/agents/`, `.agents/agents/` каждой
+  папки workspace; room-map читается из `.claude/office-rooms.json` и
+  `.kimi-code/office-rooms.json` (при конфликте имён выигрывает kimi-файл)
+- Модель сессии для Kimi — fallback на `default_model` из `~/.kimi-code/config.toml`;
+  файл событий общий (`~/.claude/agent-events.jsonl`, путь не менялся ради совместимости)
+- Usage-панели (Plan usage / ccusage) остаются Claude-only — у Kimi нет эквивалентного
+  локального API лимитов
+
 ---
 
 ## В планах
 
 ### Полировка перед публикацией
 
-- [ ] **Лицензия и LICENSE-файл** — выбрать MIT / Apache 2.0, добавить файл, обновить `package.json`.
+- [x] **Лицензия и LICENSE-файл** — MIT, файл добавлен в v0.10.1 (2026-07-28).
 - [ ] **README badges** — VS Code Marketplace, install count, version, license.
 - [ ] **Скриншоты/GIF** в README — карта офиса в работе, timeline, usage panel.
 - [ ] **Иконка расширения** для Marketplace (128×128 PNG, не SVG).
 - [ ] **CHANGELOG.md** — извлечь из git log, поддерживать вручную.
-
-### Marketplace
-
-- [ ] Регистрация `publisher` на marketplace.visualstudio.com.
-- [ ] `vsce publish` pipeline — GitHub Action на тег `v*`.
-- [ ] Open VSX Registry — параллельная публикация для VSCodium / Cursor / Theia.
-- [ ] Описание категорий, теги (`claude`, `agents`, `monitoring`).
 
 ### v1.0 — стабильность
 
@@ -221,8 +251,16 @@
 - [ ] **Webview-панель «debug»** — сырые JSONL-события с подсветкой синтаксиса.
 - [ ] **Экспорт сессии** в Markdown/HTML — отчёт о работе агентов за период.
 - [x] **Поддержка кастомных комнат** — сделано в v0.11.0 через динамические комнаты: любой id комнаты в `.claude/office-rooms.json` / `agentRooms` создаёт свою комнату.
+- [x] **Переименование расширения в нейтральное** — сделано в v0.14.0: **AI Office** (`ai-office-dashboard`, настройки/команды `aiOffice.*`, старые ключи `claudeOffice.*` deprecated с автомиграцией значений).
 - [ ] **Dark/light theme tweaks** — отдельные палитры для room accent colors.
 - [ ] **WebSocket-режим** — если хуки эволюционируют до push-нотификаций, заменить `fs.watch` на сокет.
+
+### Marketplace — отложено в самый конец
+
+- [ ] Регистрация `publisher` на marketplace.visualstudio.com.
+- [ ] `vsce publish` pipeline — GitHub Action на тег `v*`.
+- [ ] Open VSX Registry — параллельная публикация для VSCodium / Cursor / Theia.
+- [ ] Описание категорий, теги (`claude`, `agents`, `monitoring`).
 
 ### Откатано / отклонено
 

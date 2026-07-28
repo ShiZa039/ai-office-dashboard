@@ -9,7 +9,13 @@ export interface AgentEvent {
     /** Claude Code `Notification` hook — the session needs the user (permission / input). */
     | 'agent_waiting'
     /** Claude Code `UserPromptSubmit` hook — the user responded; clears waiting. */
-    | 'user_prompt';
+    | 'user_prompt'
+    /**
+     * Emitted by the PreToolUse stop_gate for every allowed tool call —
+     * clears the waiting banner once the user answers a permission prompt
+     * (e.g. plan-mode exit) and work resumes. No turn-level hook fires then.
+     */
+    | 'tool_activity';
   /** Only meaningful for agent_start/agent_stop; session-level events leave it empty. */
   agent: string;
   task?: string;
@@ -52,7 +58,7 @@ export type WebviewMessage =
       agents: Record<string, AgentState>;
       /** Session model ID; null until any event carries one. */
       model?: string | null;
-      /** Set while Claude waits for the user; null otherwise. */
+      /** Set while an agent waits for the user; null otherwise. */
       waiting?: SessionWaiting | null;
     }
   | { type: 'usage_update'; data: { subscription: unknown; cost: unknown } }
@@ -80,16 +86,17 @@ export const KNOWN_ROOMS = [
 ] as const;
 
 /**
- * Pseudo-agent representing the MAIN Claude session (the chat itself).
+ * Pseudo-agent representing the main agent session (the chat itself).
  * Working = between a user prompt and the turn's Stop; sits with the bosses
  * so it's obvious when the orchestrator grinds solo instead of delegating.
  */
-export const MAIN_AGENT_NAME = 'Claude (main)';
+export const MAIN_AGENT_NAME = 'Main agent';
 
 /**
- * Built-in Claude Code agent types. Project-specific agents are resolved by
- * the keyword heuristic below, or explicitly via `.claude/office-rooms.json`
- * in the project / the `claudeOffice.agentRooms` setting.
+ * Built-in agent types of the supported CLIs (Claude Code and Kimi Code).
+ * Project-specific agents are resolved by the keyword heuristic below, or
+ * explicitly via `office-rooms.json` in the project (`.claude/` or
+ * `.kimi-code/`) / the `aiOffice.agentRooms` setting.
  */
 export const DEFAULT_AGENT_ROOMS: Record<string, string> = {
   [MAIN_AGENT_NAME]: 'directors',
@@ -102,6 +109,10 @@ export const DEFAULT_AGENT_ROOMS: Record<string, string> = {
   'claude-code-guide': 'ai-lab',
   'statusline-setup': 'devops',
   'output-style-setup': 'frontend',
+  // Kimi Code built-in sub-agents (lowercase names).
+  coder: 'lobby',
+  explore: 'lobby',
+  plan: 'directors',
 };
 
 /**

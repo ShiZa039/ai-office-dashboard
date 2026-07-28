@@ -1,10 +1,10 @@
-# Установка Claude Office Dashboard
+# Установка AI Office
 
 **Язык:** [English](INSTALL.md) · **Русский**
 
-Расширение визуализирует работу субагентов Claude Code как «офис с комнатами». Состоит из двух частей:
+Расширение визуализирует работу субагентов Claude Code и Kimi Code CLI как «офис с комнатами». Состоит из двух частей:
 
-1. **Хуки** Claude Code — пишут события в `~/.claude/agent-events.jsonl`. **С v0.9.0 ставятся автоматически** из расширения.
+1. **Хуки** CLI (Claude Code и/или Kimi Code) — пишут события в `~/.claude/agent-events.jsonl`. **С v0.9.0 ставятся автоматически** из расширения.
 2. **VSCode-расширение** — читает JSONL и рисует дашборд.
 
 ---
@@ -14,7 +14,7 @@
 ### Требования
 
 - VSCode ≥ 1.85
-- Claude Code CLI с поддержкой хуков (`SubagentStart`/`SubagentStop`/`Stop`/`Notification`/`UserPromptSubmit`/`PreToolUse`)
+- Claude Code CLI с поддержкой хуков (`SubagentStart`/`SubagentStop`/`Stop`/`Notification`/`UserPromptSubmit`/`PreToolUse`) и/или Kimi Code CLI — оба поддерживаются одновременно
 - Python 3 **или** Node.js в `PATH` (для хук-скрипта — расширение само найдёт, что есть)
 
 ### Шаги
@@ -24,12 +24,12 @@
    ```powershell
    # Windows
    & 'C:\Users\<user>\AppData\Local\Programs\Microsoft VS Code\bin\code.cmd' `
-     --install-extension 'D:\path\to\claude-office-dashboard-0.13.2.vsix' --force
+     --install-extension 'D:\path\to\ai-office-dashboard-0.14.0.vsix' --force
    ```
 
    ```bash
    # Linux/macOS
-   code --install-extension /path/to/claude-office-dashboard-0.13.2.vsix --force
+   code --install-extension /path/to/ai-office-dashboard-0.14.0.vsix --force
    ```
 
 2. `Ctrl+Shift+P` → **Developer: Reload Window**.
@@ -37,12 +37,17 @@
 
    Что при этом происходит:
    - `emit-agent-event.py` и `emit-agent-event.js` копируются в `~/.claude/hooks/`;
-   - в `~/.claude/settings.json` добавляются семь хуков: `SessionStart`, `SubagentStart`, `SubagentStop`, `Stop` (события агентов), `Notification` (баннер «Claude ждёт вас»), `UserPromptSubmit` (начало хода + авто-снятие остановки), `PreToolUse` (гейт экстренной остановки). Существующее содержимое файла и чужие хуки не трогаются; перед записью создаётся бэкап `settings.json.claude-office.bak`;
+   - в `~/.claude/settings.json` добавляются семь хуков: `SessionStart`, `SubagentStart`, `SubagentStop`, `Stop` (события агентов), `Notification` (баннер «Claude ждёт вас»), `UserPromptSubmit` (начало хода + авто-снятие остановки), `PreToolUse` (гейт экстренной остановки). Существующее содержимое файла и чужие хуки не трогаются; перед записью создаётся бэкап `settings.json.ai-office.bak`;
+   - если установлен Kimi Code CLI, те же скрипты копируются в `~/.kimi-code/hooks/`, а в `~/.kimi-code/config.toml` мерджатся блоки `[[hooks]]` (каждый блок помечен комментарием-маяком `# office-dashboard-hook: <Event>`; создаётся бэкап `config.toml.office-dashboard.bak`);
    - при обновлении расширения хук-скрипты и набор регистраций обновляются автоматически.
 
-4. Готово. Запусти Claude Code сессию в проекте и спавни любой субагент — фигурка появится в дашборде.
+4. Готово. Запусти сессию Claude Code или Kimi Code в проекте и спавни любой субагент — фигурка появится в дашборде.
 
-Если уведомление было закрыто — `Ctrl+Shift+P` → **Claude Office: Install Claude Code Hooks**.
+Если уведомление было закрыто — `Ctrl+Shift+P` → **AI Office: Install Agent Hooks**.
+
+### Куда ставить хуки — `aiOffice.hooks.targets`
+
+По умолчанию (`auto`) хуки ставятся во все CLI, чья домашняя директория существует (`~/.claude` / `~/.kimi-code`); если нет ни одной — конфигурируются оба. Чтобы ограничить установку, поставь `"aiOffice.hooks.targets"` в `"claude"`, `"kimi"` или `"both"`. Команда **AI Office: Install Agent Hooks** ставит хуки во все выбранные цели.
 
 ### Панель Plan usage (лимиты подписки)
 
@@ -53,16 +58,16 @@
 - **Week (Opus)** — недельный лимит Opus (только Max-планы);
 - бейдж плана (Pro / Max).
 
-Токен используется только для запроса к `api.anthropic.com` и никуда больше не передаётся.
+Токен используется только для запроса к `api.anthropic.com` и никуда больше не передаётся. Эта панель (как и $-бары ccusage ниже) — только для Claude Code: у Kimi нет эквивалентного локального API.
 
 Если работаешь по API-ключу (без подписки) — лимитов нет; можно включить $-оценки расхода:
 
 ```json
 {
-  "claudeOffice.usage.costSource": "ccusage",
-  "claudeOffice.usage.limitBlockUsd": 50,
-  "claudeOffice.usage.limitWeeklyUsd": 200,
-  "claudeOffice.usage.limitWeeklyOpusUsd": 100
+  "aiOffice.usage.costSource": "ccusage",
+  "aiOffice.usage.limitBlockUsd": 50,
+  "aiOffice.usage.limitWeeklyUsd": 200,
+  "aiOffice.usage.limitWeeklyOpusUsd": 100
 }
 ```
 
@@ -74,8 +79,8 @@
 
 В большинстве случаев **ничего настраивать не нужно**:
 
-- дашборд фильтрует события по `cwd` текущего workspace (`claudeOffice.scope = workspace` по умолчанию);
-- агенты проекта из `.claude/agents/**/*.md` показываются сразу как idle-фигурки (`claudeOffice.roster.enabled`);
+- дашборд фильтрует события по `cwd` текущего workspace (`aiOffice.scope = workspace` по умолчанию);
+- агенты проекта из `.claude/agents/**/*.md` показываются сразу как idle-фигурки (`aiOffice.roster.enabled`);
 - комната выбирается keyword-эвристикой по имени агента (`react-*` → frontend, `*-director` → directors, `mqtt/esp32` → iot и т.д.).
 
 Кастомизация нужна, только если эвристика промахивается.
@@ -93,25 +98,25 @@
 }
 ```
 
-Вариант 2 — VSCode settings (`Ctrl+,` → Workspace → `claudeOffice.agentRooms`):
+Вариант 2 — VSCode settings (`Ctrl+,` → Workspace → `aiOffice.agentRooms`):
 
 ```json
 {
-  "claudeOffice.agentRooms": {
+  "aiOffice.agentRooms": {
     "ux-research-agent": "frontend",
     "compliance-checker": "security"
   }
 }
 ```
 
-Приоритет: **`.claude/office-rooms.json` > `claudeOffice.agentRooms` > встроенные агенты Claude Code > эвристика > лобби**. Изменения подхватываются на лету.
+Приоритет: **`.claude/office-rooms.json` > `aiOffice.agentRooms` > встроенные агенты Claude Code > эвристика > лобби**. Изменения подхватываются на лету.
 
 ### Отключить per-window изоляцию
 
 Чтобы видеть события всех окон VSCode сразу:
 
 ```json
-{ "claudeOffice.scope": "global" }
+{ "aiOffice.scope": "global" }
 ```
 
 ---
@@ -171,17 +176,17 @@ tail -5 ~/.claude/agent-events.jsonl                                 # Linux/mac
 
 | Симптом | Причина | Что делать |
 |---|---|---|
-| Дашборд пустой, есть только idle-фигурки | Хуки не установлены/не пишут | `Ctrl+Shift+P` → **Claude Office: Install Claude Code Hooks**; проверь, растёт ли `~/.claude/agent-events.jsonl` |
+| Дашборд пустой, есть только idle-фигурки | Хуки не установлены/не пишут | `Ctrl+Shift+P` → **AI Office: Install Agent Hooks**; проверь, растёт ли `~/.claude/agent-events.jsonl` |
 | `agent-events.jsonl` пустой | Хуки не зарегистрированы | Проверь `~/.claude/settings.json` (секция `hooks`), перезапусти Claude Code |
-| Уведомление об установке не появляется | Ранее нажато «Don't ask again» | Команда **Install Claude Code Hooks** ставит вручную |
-| События приходят, но не отображаются | Cwd-фильтр режет всё | В Output (`View → Output → Claude Office`) строка `cwd filter`; для проверки поставь `claudeOffice.scope = global` |
-| Агент всегда в Лобби | Имя не подходит под эвристику | Добавь в `.claude/office-rooms.json` или `claudeOffice.agentRooms` |
+| Уведомление об установке не появляется | Ранее нажато «Don't ask again» | Команда **AI Office: Install Agent Hooks** ставит вручную |
+| События приходят, но не отображаются | Cwd-фильтр режет всё | В Output (`View → Output → AI Office`) строка `cwd filter`; для проверки поставь `aiOffice.scope = global` |
+| Агент всегда в Лобби | Имя не подходит под эвристику | Добавь в `.claude/office-rooms.json` или `aiOffice.agentRooms` |
 | Plan usage: `no Claude Code login found` | Нет `~/.claude/.credentials.json` | Залогинься в Claude Code (`claude` → login по подписке) |
-| Plan usage: `token expired` | Токен протух | Запусти любую сессию Claude Code — токен обновится сам |
+| Plan usage: устаревшие данные | Токен протух | Истечение теперь молчаливое — запусти любую сессию Claude Code, токен обновится сам |
 | Plan usage: `HTTP 429` | Рейт-лимит эндпоинта | Само пройдёт; можно увеличить `usage.pollSeconds` |
 | Кириллица в `task` ломается | Старый `emit-agent-event.py` | Хук-скрипты обновляются автоматически при `hooks.autoSetup = true`; иначе переустанови хуки командой |
-| 🛑 не блокирует агентов | `PreToolUse`-хук не зарегистрирован (старый набор хуков) | **Install Claude Code Hooks** — недостающие события домерджатся |
-| Инструменты блокируются, хотя остановку не включал | Остался флаг остановки | Нажми «Продолжить» на дашборде, отправь новый промпт или удали `~/.claude/office-stop.json` |
+| 🛑 не блокирует агентов | `PreToolUse`-хук не зарегистрирован (старый набор хуков) | **AI Office: Install Agent Hooks** — недостающие события домерджатся |
+| Инструменты блокируются, хотя остановку не включал | Остался флаг остановки | Нажми «Продолжить» на дашборде, отправь новый промпт или удали `~/.claude/office-stop.json` и `~/.kimi-code/office-stop.json` |
 
 ---
 
@@ -189,7 +194,7 @@ tail -5 ~/.claude/agent-events.jsonl                                 # Linux/mac
 
 ```powershell
 & 'C:\Users\<user>\AppData\Local\Programs\Microsoft VS Code\bin\code.cmd' `
-  --install-extension 'D:\path\to\claude-office-dashboard-X.Y.Z.vsix' --force
+  --install-extension 'D:\path\to\ai-office-dashboard-X.Y.Z.vsix' --force
 ```
 
-Затем **Developer: Reload Window**. Хук-скрипты обновятся сами при следующей активации (если `claudeOffice.hooks.autoSetup = true`).
+Затем **Developer: Reload Window**. Хук-скрипты обновятся сами при следующей активации (если `aiOffice.hooks.autoSetup = true`).

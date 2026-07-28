@@ -10,8 +10,8 @@ interface WebviewSlot {
 }
 
 export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
-  public static readonly viewId = 'claudeOffice.dashboard';
-  public static readonly editorViewType = 'claudeOffice.dashboardEditor';
+  public static readonly viewId = 'aiOffice.dashboard';
+  public static readonly editorViewType = 'aiOffice.dashboardEditor';
 
   private viewSlot: WebviewSlot | null = null;
   private panelSlot: WebviewSlot | null = null;
@@ -20,10 +20,11 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
   private lastModel: string | null = null;
   private lastWaiting: SessionWaiting | null = null;
   private lastStop: { active: boolean; since: string | null } = { active: false, since: null };
-  private lastSubscription: unknown = null;
+  private lastSubscription: { claude: unknown; kimi: unknown } = { claude: null, kimi: null };
   private lastCost: unknown = null;
-  private usageErrors: { subscription: string | null; cost: string | null } = {
-    subscription: null,
+  private usageErrors: { claude: string | null; kimi: string | null; cost: string | null } = {
+    claude: null,
+    kimi: null,
     cost: null,
   };
 
@@ -72,7 +73,7 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
     }
     const panel = vscode.window.createWebviewPanel(
       OfficeDashboardProvider.editorViewType,
-      'Claude Office',
+      'AI Office',
       { viewColumn: vscode.ViewColumn.Active, preserveFocus: false },
       {
         enableScripts: true,
@@ -114,8 +115,12 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
   }
 
   updateSubscription(data: unknown): void {
-    this.lastSubscription = data;
-    this.usageErrors.subscription = null;
+    const provider =
+      data && typeof data === 'object' && typeof (data as { provider?: unknown }).provider === 'string'
+        ? ((data as { provider: string }).provider as 'claude' | 'kimi')
+        : 'claude';
+    this.lastSubscription[provider] = data;
+    this.usageErrors[provider] = null;
     this.pushUsage();
   }
 
@@ -125,7 +130,7 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
     this.pushUsage();
   }
 
-  reportUsageError(source: 'subscription' | 'cost', message: string): void {
+  reportUsageError(source: 'claude' | 'kimi' | 'cost', message: string): void {
     this.usageErrors[source] = message;
     this.broadcast({ type: 'usage_error', source, message });
   }
@@ -178,13 +183,13 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
       });
     }
     webview.postMessage({ type: 'stop_state', ...this.lastStop });
-    if (this.lastSubscription !== null || this.lastCost !== null) {
+    if (this.lastSubscription.claude !== null || this.lastSubscription.kimi !== null || this.lastCost !== null) {
       webview.postMessage({
         type: 'usage_update',
         data: { subscription: this.lastSubscription, cost: this.lastCost },
       });
     }
-    for (const source of ['subscription', 'cost'] as const) {
+    for (const source of ['claude', 'kimi', 'cost'] as const) {
       const message = this.usageErrors[source];
       if (message) {
         webview.postMessage({ type: 'usage_error', source, message });

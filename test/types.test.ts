@@ -8,6 +8,12 @@ assert.strictEqual(getRoomForAgent('Explore'), 'lobby', 'Explore → lobby');
 assert.strictEqual(getRoomForAgent('Plan'), 'directors', 'Plan → directors');
 assert.strictEqual(getRoomForAgent('code-reviewer'), 'qa', 'code-reviewer → qa');
 
+// --- Built-in Kimi Code sub-agents map directly ---
+
+assert.strictEqual(getRoomForAgent('coder'), 'lobby', 'coder → lobby');
+assert.strictEqual(getRoomForAgent('explore'), 'lobby', 'explore → lobby');
+assert.strictEqual(getRoomForAgent('plan'), 'directors', 'plan → directors');
+
 // --- Generic team names resolve via the keyword heuristic (no project profile) ---
 
 assert.strictEqual(getRoomForAgent('backend-lead'), 'backend', 'backend-lead via heuristic');

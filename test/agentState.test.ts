@@ -269,6 +269,18 @@ function mkEvent(overrides: Partial<AgentEvent>): AgentEvent {
   assert.strictEqual(store.getWaiting(), null, 'session_stop clears waiting');
 }
 
+// --- Waiting cleared by tool_activity (first tool call after the answer) ---
+
+{
+  const store = new AgentStateStore();
+  // The plan-mode exit scenario: PermissionRequest raises the banner, the
+  // user approves, and the next tool call (stop_gate allow path) clears it.
+  store.processEvent(mkEvent({ event: 'agent_waiting', agent: '', task: 'Exit plan mode?' }));
+  assert.ok(store.getWaiting(), 'plan-exit prompt raises waiting');
+  store.processEvent(mkEvent({ event: 'tool_activity', agent: '' }));
+  assert.strictEqual(store.getWaiting(), null, 'tool_activity clears waiting');
+}
+
 // --- Stale notifications replayed from history never raise the banner ---
 
 {

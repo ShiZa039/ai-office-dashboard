@@ -208,6 +208,13 @@ export class AgentStateStore {
         break;
       }
 
+      case 'tool_activity': {
+        // Waiting was already cleared above: the banner lifts on the first
+        // tool call after the user answers a permission prompt. Nothing else
+        // to track — per-tool state would be noise.
+        break;
+      }
+
       case 'session_stop': {
         // The `Stop` hook fires when the MAIN turn ends — background subagents
         // may well still be running (their own agent_stop arrives later), so
@@ -258,7 +265,7 @@ export class AgentStateStore {
     return this.currentModel;
   }
 
-  /** Set while Claude waits for the user (permission / input), null otherwise. */
+  /** Set while an agent waits for the user (permission / input), null otherwise. */
   getWaiting(): SessionWaiting | null {
     return this.waiting;
   }

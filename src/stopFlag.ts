@@ -1,9 +1,12 @@
 /**
- * Emergency-stop flag (~/.claude/office-stop.json) shared with the hook
- * scripts: while the flag is active, the PreToolUse `stop_gate` hook denies
- * every tool call in the covered cwds. Pure logic is separated from the
- * filesystem glue so it stays unit-testable; keep the coverage semantics in
- * sync with hooks/emit-agent-event.py / .js.
+ * Emergency-stop flag shared with the hook scripts: while the flag is active,
+ * the PreToolUse `stop_gate` hook denies every tool call in the covered cwds.
+ * Each agent CLI has its own flag file (~/.claude/office-stop.json resp.
+ * ~/.kimi-code/office-stop.json); the extension writes/reads ALL of them so
+ * one dashboard button stops every CLI at once, and a human prompt in any
+ * CLI releases all of them (the hook scripts mirror this). Pure logic is
+ * separated from the filesystem glue so it stays unit-testable; keep the
+ * coverage semantics in sync with hooks/emit-agent-event.py / .js.
  */
 import * as fs from 'fs';
 import * as os from 'os';
@@ -15,10 +18,6 @@ export interface StopFlag {
   cwds: string[];
   /** ISO timestamp of activation. */
   since: string;
-}
-
-export function stopFlagPath(): string {
-  return path.join(os.homedir(), '.claude', 'office-stop.json');
 }
 
 /** Parse flag file content. Returns null for malformed or inactive flags. */
@@ -117,24 +116,84 @@ export function stopAppliesToWindow(
 
 // ── Filesystem glue ──
 
-export function readStopFlag(): StopFlag | null {
+/** Claude Code's flag file. */
+export function stopFlagPath(): string {
+  return path.join(os.homedir(), '.claude', 'office-stop.json');
+}
+
+/** Kimi Code's flag file. */
+export function kimiStopFlagPath(): string {
+  return path.join(os.homedir(), '.kimi-code', 'office-stop.json');
+}
+
+/** Every cli's flag file — the dashboard stop button covers all of them. */
+export function stopFlagPaths(): string[] {
+  return [stopFlagPath(), kimiStopFlagPath()];
+}
+
+function readStopFlagAt(file: string): StopFlag | null {
   try {
-    return parseStopFlag(fs.readFileSync(stopFlagPath(), 'utf-8'));
+    return parseStopFlag(fs.readFileSync(file, 'utf-8'));
   } catch {
     return null;
   }
 }
 
-export function writeStopFlag(flag: StopFlag): void {
-  const file = stopFlagPath();
+function writeStopFlagAt(file: string, flag: StopFlag): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(flag, null, 2) + '\n', 'utf-8');
 }
 
-export function clearStopFlag(): void {
+function clearStopFlagAt(file: string): void {
   try {
-    fs.unlinkSync(stopFlagPath());
+    fs.unlinkSync(file);
   } catch {
     // already gone — fine
   }
+}
+
+/** The first active flag across all cli flag files, or null. */
+export function readStopFlag(): StopFlag | null {
+  for (const file of stopFlagPaths()) {
+    const flag = readStopFlagAt(file);
+    if (flag) return flag;
+  }
+  return null;
+}
+
+export function writeStopFlag(flag: StopFlag): void {
+  for (const file of stopFlagPaths()) {
+    writeStopFlagAt(file, flag);
+  }
+}
+
+export function clearStopFlag(): void {
+  for (const file of stopFlagPaths()) {
+    clearStopFlagAt(file);
+  }
+}
+
+/** Activate the stop for `cwds` in every cli's flag file (merging per file). */
+export function activateStopEverywhere(cwds: string[] | null, now: string): void {
+  for (const file of stopFlagPaths()) {
+    writeStopFlagAt(file, activateStopFlag(readStopFlagAt(file), cwds, now));
+  }
+}
+
+/**
+ * Release the stop for `cwds` in every cli's flag file (subtracting per
+ * file). Returns true if any stop is still active afterwards.
+ */
+export function releaseStopEverywhere(cwds: string[] | null): boolean {
+  let remaining = false;
+  for (const file of stopFlagPaths()) {
+    const next = deactivateStopFlag(readStopFlagAt(file), cwds);
+    if (next) {
+      writeStopFlagAt(file, next);
+      remaining = true;
+    } else {
+      clearStopFlagAt(file);
+    }
+  }
+  return remaining;
 }

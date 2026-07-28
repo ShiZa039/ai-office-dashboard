@@ -1,13 +1,13 @@
 {
-  "name": "claude-office-dashboard",
-  "displayName": "Claude Office Dashboard",
+  "name": "ai-office-dashboard",
+  "displayName": "AI Office",
   "description": "%ext.description%",
-  "version": "0.13.2",
+  "version": "0.14.0",
   "publisher": "shiza039",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ShiZa039/claude-office-dashboard.git"
+    "url": "https://github.com/ShiZa039/ai-office-dashboard.git"
   },
   "engines": {
     "vscode": "^1.85.0"
@@ -23,64 +23,64 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "claudeOffice",
-          "title": "Claude Office",
+          "id": "aiOffice",
+          "title": "AI Office",
           "icon": "media/activitybar-icon.svg"
         }
       ]
     },
     "views": {
-      "claudeOffice": [
+      "aiOffice": [
         {
           "type": "webview",
-          "id": "claudeOffice.dashboard",
+          "id": "aiOffice.dashboard",
           "name": "%view.dashboard.name%",
-          "contextualTitle": "Claude Office"
+          "contextualTitle": "AI Office"
         }
       ]
     },
     "commands": [
       {
-        "command": "claudeOffice.showDashboard",
+        "command": "aiOffice.showDashboard",
         "title": "%cmd.showDashboard%"
       },
       {
-        "command": "claudeOffice.openInEditor",
+        "command": "aiOffice.openInEditor",
         "title": "%cmd.openInEditor%",
         "icon": "$(link-external)"
       },
       {
-        "command": "claudeOffice.emergencyStop",
+        "command": "aiOffice.emergencyStop",
         "title": "%cmd.emergencyStop%",
         "icon": "$(stop-circle)"
       },
       {
-        "command": "claudeOffice.clearEvents",
+        "command": "aiOffice.clearEvents",
         "title": "%cmd.clearEvents%"
       },
       {
-        "command": "claudeOffice.installHooks",
+        "command": "aiOffice.installHooks",
         "title": "%cmd.installHooks%"
       }
     ],
     "menus": {
       "view/title": [
         {
-          "command": "claudeOffice.emergencyStop",
-          "when": "view == claudeOffice.dashboard",
+          "command": "aiOffice.emergencyStop",
+          "when": "view == aiOffice.dashboard",
           "group": "navigation@0"
         },
         {
-          "command": "claudeOffice.openInEditor",
-          "when": "view == claudeOffice.dashboard",
+          "command": "aiOffice.openInEditor",
+          "when": "view == aiOffice.dashboard",
           "group": "navigation@1"
         }
       ]
     },
     "configuration": {
-      "title": "Claude Office Dashboard",
+      "title": "AI Office",
       "properties": {
-        "claudeOffice.language": {
+        "aiOffice.language": {
           "type": "string",
           "enum": [
             "system",
@@ -97,38 +97,55 @@
           ],
           "description": "%cfg.language%"
         },
-        "claudeOffice.eventsFile": {
+        "aiOffice.eventsFile": {
           "type": "string",
           "default": "",
           "description": "%cfg.eventsFile%"
         },
-        "claudeOffice.hooks.autoSetup": {
+        "aiOffice.hooks.autoSetup": {
           "type": "boolean",
           "default": true,
           "description": "%cfg.hooks.autoSetup%"
         },
-        "claudeOffice.statusBar.enabled": {
+        "aiOffice.hooks.targets": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "claude",
+            "kimi",
+            "both"
+          ],
+          "default": "auto",
+          "enumDescriptions": [
+            "%cfg.hooks.targets.auto%",
+            "%cfg.hooks.targets.claude%",
+            "%cfg.hooks.targets.kimi%",
+            "%cfg.hooks.targets.both%"
+          ],
+          "description": "%cfg.hooks.targets%"
+        },
+        "aiOffice.statusBar.enabled": {
           "type": "boolean",
           "default": true,
           "description": "%cfg.statusBar.enabled%"
         },
-        "claudeOffice.roster.enabled": {
+        "aiOffice.roster.enabled": {
           "type": "boolean",
           "default": true,
           "description": "%cfg.roster.enabled%"
         },
-        "claudeOffice.usage.enabled": {
+        "aiOffice.usage.enabled": {
           "type": "boolean",
           "default": true,
           "description": "%cfg.usage.enabled%"
         },
-        "claudeOffice.usage.pollSeconds": {
+        "aiOffice.usage.pollSeconds": {
           "type": "number",
           "default": 90,
           "minimum": 30,
           "description": "%cfg.usage.pollSeconds%"
         },
-        "claudeOffice.usage.costSource": {
+        "aiOffice.usage.costSource": {
           "type": "string",
           "enum": [
             "off",
@@ -137,22 +154,22 @@
           "default": "off",
           "description": "%cfg.usage.costSource%"
         },
-        "claudeOffice.usage.limitBlockUsd": {
+        "aiOffice.usage.limitBlockUsd": {
           "type": "number",
           "default": 0,
           "description": "%cfg.usage.limitBlockUsd%"
         },
-        "claudeOffice.usage.limitWeeklyUsd": {
+        "aiOffice.usage.limitWeeklyUsd": {
           "type": "number",
           "default": 0,
           "description": "%cfg.usage.limitWeeklyUsd%"
         },
-        "claudeOffice.usage.limitWeeklyOpusUsd": {
+        "aiOffice.usage.limitWeeklyOpusUsd": {
           "type": "number",
           "default": 0,
           "description": "%cfg.usage.limitWeeklyOpusUsd%"
         },
-        "claudeOffice.scope": {
+        "aiOffice.scope": {
           "type": "string",
           "enum": [
             "workspace",
@@ -161,13 +178,83 @@
           "default": "workspace",
           "description": "%cfg.scope%"
         },
-        "claudeOffice.agentRooms": {
+        "aiOffice.agentRooms": {
           "type": "object",
           "default": {},
           "additionalProperties": {
             "type": "string"
           },
           "markdownDescription": "%cfg.agentRooms%"
+        },
+        "claudeOffice.language": {
+          "type": "string",
+          "deprecationMessage": "%cfg.deprecated.rename%",
+          "description": "%cfg.deprecated.rename%"
+        },
+        "claudeOffice.eventsFile": {
+          "type": "string",
+          "deprecationMessage": "%cfg.deprecated.rename%",
+          "description": "%cfg.deprecated.rename%"
+        },
+        "claudeOffice.hooks.autoSetup": {
+          "type": "boolean",
+          "deprecationMessage": "%cfg.deprecated.rename%",
+          "description": "%cfg.deprecated.rename%"
+        },
+        "claudeOffice.hooks.targets": {
+          "type": "string",
+          "deprecationMessage": "%cfg.deprecated.rename%",
+          "description": "%cfg.deprecated.rename%"
+        },
+        "claudeOffice.statusBar.enabled": {
+          "type": "boolean",
+          "deprecationMessage": "%cfg.deprecated.rename%",
+          "description": "%cfg.deprecated.rename%"
+        },
+        "claudeOffice.roster.enabled": {
+          "type": "boolean",
+          "deprecationMessage": "%cfg.deprecated.rename%",
+          "description": "%cfg.deprecated.rename%"
+        },
+        "claudeOffice.usage.enabled": {
+          "type": "boolean",
+          "deprecationMessage": "%cfg.deprecated.rename%",
+          "description": "%cfg.deprecated.rename%"
+        },
+        "claudeOffice.usage.pollSeconds": {
+          "type": "number",
+          "deprecationMessage": "%cfg.deprecated.rename%",
+          "description": "%cfg.deprecated.rename%"
+        },
+        "claudeOffice.usage.costSource": {
+          "type": "string",
+          "deprecationMessage": "%cfg.deprecated.rename%",
+          "description": "%cfg.deprecated.rename%"
+        },
+        "claudeOffice.usage.limitBlockUsd": {
+          "type": "number",
+          "deprecationMessage": "%cfg.deprecated.rename%",
+          "description": "%cfg.deprecated.rename%"
+        },
+        "claudeOffice.usage.limitWeeklyUsd": {
+          "type": "number",
+          "deprecationMessage": "%cfg.deprecated.rename%",
+          "description": "%cfg.deprecated.rename%"
+        },
+        "claudeOffice.usage.limitWeeklyOpusUsd": {
+          "type": "number",
+          "deprecationMessage": "%cfg.deprecated.rename%",
+          "description": "%cfg.deprecated.rename%"
+        },
+        "claudeOffice.scope": {
+          "type": "string",
+          "deprecationMessage": "%cfg.deprecated.rename%",
+          "description": "%cfg.deprecated.rename%"
+        },
+        "claudeOffice.agentRooms": {
+          "type": "object",
+          "deprecationMessage": "%cfg.deprecated.rename%",
+          "description": "%cfg.deprecated.rename%"
         }
       }
     }
@@ -178,7 +265,7 @@
     "bundle": "esbuild src/extension.ts --bundle --outfile=out/src/extension.js --external:vscode --format=cjs --platform=node --target=node18 --minify",
     "watch": "tsc -watch -p ./",
     "lint": "eslint src --ext ts",
-    "test": "tsc -p ./ && node out/test/eventParser.test.js && node out/test/types.test.js && node out/test/agentState.test.js && node out/test/hookConfig.test.js && node out/test/subscriptionUsage.test.js && node out/test/agentRoster.test.js && node out/test/emitAgentEvent.test.js && node out/test/stopFlag.test.js"
+    "test": "tsc -p ./ && node out/test/eventParser.test.js && node out/test/types.test.js && node out/test/agentState.test.js && node out/test/hookConfig.test.js && node out/test/hookConfigKimi.test.js && node out/test/subscriptionUsage.test.js && node out/test/kimiUsage.test.js && node out/test/agentRoster.test.js && node out/test/emitAgentEvent.test.js && node out/test/stopFlag.test.js && node out/test/configMigration.test.js"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

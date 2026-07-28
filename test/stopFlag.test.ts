@@ -5,6 +5,7 @@ import {
   deactivateStopFlag,
   parseStopFlag,
   stopAppliesToWindow,
+  stopFlagPaths,
   StopFlag,
 } from '../src/stopFlag';
 
@@ -156,3 +157,12 @@ if (process.platform === 'win32') {
 }
 
 console.log('All stopFlag tests passed.');
+
+// --- stopFlagPaths: one flag file per agent CLI ---
+
+{
+  const paths = stopFlagPaths();
+  assert.strictEqual(paths.length, 2, 'one stop flag per cli');
+  assert.ok(paths[0].endsWith(path.join('.claude', 'office-stop.json')), 'claude flag path');
+  assert.ok(paths[1].endsWith(path.join('.kimi-code', 'office-stop.json')), 'kimi flag path');
+}

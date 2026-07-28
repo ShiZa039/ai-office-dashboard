@@ -4,7 +4,7 @@ import * as cp from 'child_process';
 /**
  * The dashboard UI language. VSCode's display language (`vscode.env.language`)
  * is often left at English by habit, so "system" (the default) resolves the
- * real OS language instead; a `claudeOffice.language` setting can pin either
+ * real OS language instead; a `aiOffice.language` setting can pin either
  * source or an explicit language.
  */
 
@@ -36,10 +36,10 @@ function detectSystemLocale(): string {
   }
 }
 
-/** Resolved UI locale per the `claudeOffice.language` setting. */
+/** Resolved UI locale per the `aiOffice.language` setting. */
 export function uiLocale(): string {
   const cfg = vscode.workspace
-    .getConfiguration('claudeOffice')
+    .getConfiguration('aiOffice')
     .get<string>('language', 'system');
   if (cfg === 'vscode') return vscode.env.language || 'en';
   if (cfg && cfg !== 'system') return cfg; // explicit language code

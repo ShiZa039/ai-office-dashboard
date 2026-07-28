@@ -6,13 +6,13 @@
   <meta http-equiv="Content-Security-Policy"
     content="default-src 'none'; style-src {{cspSource}} 'unsafe-inline'; script-src 'nonce-{{nonce}}' {{cspSource}}; img-src {{cspSource}}; font-src {{cspSource}};">
   <link rel="stylesheet" href="{{cssUri}}">
-  <title>Claude Office</title>
+  <title>AI Office</title>
 </head>
 <body>
   <div class="office">
     <div class="office-header">
       <div class="office-logo">&#9670;</div>
-      <h2 class="office-title">Claude Office</h2>
+      <h2 class="office-title">AI Office</h2>
       <span class="office-model" id="office-model" hidden></span>
       <button class="idle-toggle" id="idle-toggle" type="button">idle</button>
       <div class="office-status" id="office-status">
@@ -41,7 +41,7 @@
     <div class="waiting-banner" id="waiting-banner" hidden>
       <span class="waiting-hand">&#9995;</span>
       <div class="waiting-text">
-        <div class="waiting-title" data-i18n="claudeWaiting">Claude is waiting for you</div>
+        <div class="waiting-title" data-i18n="agentWaiting">The agent is waiting for you</div>
         <div class="waiting-msg" id="waiting-msg"></div>
       </div>
     </div>
@@ -91,11 +91,11 @@
     <div class="usage-panel" id="usage-panel">
       <div class="usage-header">
         <span class="usage-title" data-i18n="labelPlanUsage">Plan usage</span>
-        <span class="usage-plan" id="usage-plan" hidden></span>
         <span class="usage-updated" id="usage-updated" data-i18n="labelLoading">loading&hellip;</span>
       </div>
-      <!-- Subscription limit bars are built dynamically from the API response. -->
+      <!-- Limit bars (with provider captions) are built dynamically from the API responses. -->
       <div class="usage-group" id="usage-subscription" hidden></div>
+      <div class="usage-group" id="usage-kimi" hidden></div>
       <div class="usage-forecast" id="usage-forecast" hidden></div>
       <div class="usage-group" id="usage-cost" hidden>
         <div class="usage-bar" data-kind="block">

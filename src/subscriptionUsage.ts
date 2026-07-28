@@ -8,6 +8,9 @@
  * macOS keychain fallback). We never refresh tokens ourselves — if the token
  * is expired, any Claude Code session refreshes it.
  *
+ * The watcher is provider-agnostic (see UsageProviderConfig); the Kimi Code
+ * provider lives in kimiUsage.ts.
+ *
  * No vscode imports — unit-testable; wiring lives in extension.ts.
  */
 import * as fs from 'fs';
@@ -32,6 +35,8 @@ export interface UsageLimitEntry {
 
 export interface SubscriptionSnapshot {
   fetchedAt: string;
+  /** Which provider this snapshot belongs to (set by the watcher, not parsers). */
+  provider?: 'claude' | 'kimi';
   /** Raw subscription type from credentials, e.g. "pro" / "max". */
   plan: string | null;
   limits: UsageLimitEntry[];
@@ -152,6 +157,54 @@ export function readCredentials(homeDir: string = os.homedir()): OAuthCredential
   return null;
 }
 
+export interface ProviderCredentials {
+  accessToken: string;
+  /** Epoch millis, if reported. */
+  expiresAt: number | null;
+  /** Plan label for the UI, e.g. "max" / "intermediate". */
+  plan: string | null;
+}
+
+/** Everything the watcher needs to poll one provider's usage endpoint. */
+export interface UsageProviderConfig {
+  id: 'claude' | 'kimi';
+  url: string;
+  headers: (accessToken: string) => Record<string, string>;
+  readCredentials: () => ProviderCredentials | null;
+  parse: (body: unknown, plan: string | null, fetchedAt: string) => SubscriptionSnapshot | null;
+  messages: {
+    /** null = optional provider — stay silent when it was never logged in. */
+    noCredentials: string | null;
+    /** null = expiry is routine (short-lived tokens) — keep last data, just log. */
+    expired: string | null;
+    unauthorized: string;
+  };
+}
+
+export const claudeUsageProvider: UsageProviderConfig = {
+  id: 'claude',
+  url: USAGE_URL,
+  headers: (accessToken) => ({
+    Authorization: `Bearer ${accessToken}`,
+    'anthropic-beta': 'oauth-2025-04-20',
+    'User-Agent': USER_AGENT,
+    Accept: 'application/json',
+  }),
+  readCredentials: () => {
+    const c = readCredentials();
+    return c && { accessToken: c.accessToken, expiresAt: c.expiresAt, plan: c.subscriptionType };
+  },
+  parse: parseUsageResponse,
+  messages: {
+    noCredentials:
+      'no Claude Code login found — sign in to Claude Code (Pro/Max) to see plan limits',
+    // Expiry is routine — any Claude Code session refreshes the token. Keep last
+    // data on screen and just log, like the Kimi provider does.
+    expired: null,
+    unauthorized: 'not authorized — re-login in Claude Code to refresh credentials',
+  },
+};
+
 export interface SubscriptionWatcherOptions {
   intervalMs: number;
   onUpdate: (snapshot: SubscriptionSnapshot) => void;
@@ -163,7 +216,10 @@ export class SubscriptionUsageWatcher {
   private timer: NodeJS.Timeout | null = null;
   private inFlight = false;
 
-  constructor(private opts: SubscriptionWatcherOptions) {}
+  constructor(
+    private config: UsageProviderConfig,
+    private opts: SubscriptionWatcherOptions,
+  ) {}
 
   start(): void {
     void this.tick();
@@ -180,51 +236,41 @@ export class SubscriptionUsageWatcher {
   private async tick(): Promise<void> {
     if (this.inFlight) return;
     this.inFlight = true;
+    const cfg = this.config;
     try {
-      const creds = readCredentials();
+      const creds = cfg.readCredentials();
       if (!creds) {
-        this.opts.onError(
-          'no Claude Code login found — sign in to Claude Code (Pro/Max) to see plan limits',
-        );
+        if (cfg.messages.noCredentials) this.opts.onError(cfg.messages.noCredentials);
         return;
       }
       if (creds.expiresAt && creds.expiresAt < Date.now()) {
-        this.opts.onError('Claude Code token expired — start any Claude Code session to refresh it');
+        if (cfg.messages.expired) this.opts.onError(cfg.messages.expired);
+        else this.opts.log?.(`[subscription:${cfg.id}] token expired, will retry next poll`);
         return;
       }
-      const res = await fetch(USAGE_URL, {
-        headers: {
-          Authorization: `Bearer ${creds.accessToken}`,
-          'anthropic-beta': 'oauth-2025-04-20',
-          'User-Agent': USER_AGENT,
-          Accept: 'application/json',
-        },
-      });
+      const res = await fetch(cfg.url, { headers: cfg.headers(creds.accessToken) });
       if (res.status === 401 || res.status === 403) {
-        this.opts.onError('not authorized — re-login in Claude Code to refresh credentials');
+        this.opts.onError(cfg.messages.unauthorized);
         return;
       }
       if (res.status === 429) {
-        this.opts.log?.('[subscription] rate limited (429), will retry next poll');
+        this.opts.log?.(`[subscription:${cfg.id}] rate limited (429), will retry next poll`);
         return; // keep last good data on screen
       }
       if (!res.ok) {
         this.opts.onError(`usage endpoint returned HTTP ${res.status}`);
         return;
       }
-      const snapshot = parseUsageResponse(
-        await res.json(),
-        creds.subscriptionType,
-        new Date().toISOString(),
-      );
+      const snapshot = cfg.parse(await res.json(), creds.plan, new Date().toISOString());
       if (!snapshot) {
         this.opts.onError('usage endpoint returned no recognizable limit data');
         return;
       }
+      snapshot.provider = cfg.id;
       this.opts.onUpdate(snapshot);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.opts.log?.(`[subscription] error: ${msg}`);
+      this.opts.log?.(`[subscription:${cfg.id}] error: ${msg}`);
       this.opts.onError(msg);
     } finally {
       this.inFlight = false;

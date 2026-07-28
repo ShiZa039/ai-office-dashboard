@@ -59,13 +59,13 @@ export class UsageWatcher {
 
   private getPollSeconds(): number {
     const v = vscode.workspace
-      .getConfiguration('claudeOffice')
+      .getConfiguration('aiOffice')
       .get<number>('usage.pollSeconds', 90);
     return Math.max(30, v);
   }
 
   private getLimits(): UsageLimits {
-    const cfg = vscode.workspace.getConfiguration('claudeOffice');
+    const cfg = vscode.workspace.getConfiguration('aiOffice');
     return {
       block: cfg.get<number>('usage.limitBlockUsd', 0),
       weekly: cfg.get<number>('usage.limitWeeklyUsd', 0),

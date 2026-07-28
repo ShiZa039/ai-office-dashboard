@@ -47,6 +47,29 @@ fs.writeFileSync(path.join(agentsDir, 'notes.txt'), 'not an agent', 'utf-8');
 const names = discoverProjectAgents([tmp]);
 assert.deepStrictEqual(names, ['db-specialist', 'team-lead'], 'recursive discovery, sorted');
 
+// --- kimi-code and shared .agents directories are discovered too ---
+
+fs.mkdirSync(path.join(tmp, '.kimi-code', 'agents'), { recursive: true });
+fs.writeFileSync(
+  path.join(tmp, '.kimi-code', 'agents', 'reviewer.md'),
+  '---\nname: kimi-reviewer\ndescription: x\n---\nbody',
+  'utf-8',
+);
+fs.mkdirSync(path.join(tmp, '.agents', 'agents'), { recursive: true });
+fs.writeFileSync(path.join(tmp, '.agents', 'agents', 'shared.md'), 'no frontmatter', 'utf-8');
+// Same name in two directories must not duplicate.
+fs.writeFileSync(
+  path.join(tmp, '.agents', 'agents', 'lead-copy.md'),
+  '---\nname: team-lead\n---\nbody',
+  'utf-8',
+);
+
+assert.deepStrictEqual(
+  discoverProjectAgents([tmp]),
+  ['db-specialist', 'kimi-reviewer', 'shared', 'team-lead'],
+  'all cli agent directories merged, duplicates collapsed',
+);
+
 assert.deepStrictEqual(
   discoverProjectAgents([path.join(tmp, 'no-such-folder')]),
   [],
