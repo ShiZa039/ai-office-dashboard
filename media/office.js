@@ -131,6 +131,20 @@ var MESSAGES = {
     stopBtnTitle: "Emergency stop — block all agent tool calls now. Sessions and context survive; resume with the button or a new prompt.",
     logStopOn: "EMERGENCY STOP — agents blocked",
     logStopOff: "emergency stop released",
+    drawerClose: "Close",
+    drawerCloseTitle: "Close the panel (Esc)",
+    drawerCurrentTask: "Current task",
+    drawerHistory: "History",
+    drawerLoading: "loading…",
+    drawerNoHistory: "No runs recorded yet",
+    drawerWorking: "in progress",
+    drawerNoStart: "start not recorded",
+    drawerRuns: ["run", "runs"],
+    drawerErrors: ["error", "errors"],
+    drawerAvg: "avg {d}",
+    drawerStats: "{runs} · {errors} · {avg}",
+    drawerStateIdle: "idle",
+    drawerStateError: "error",
   },
   ru: {
     waitingForYou: "ждёт вашего ответа",
@@ -177,6 +191,20 @@ var MESSAGES = {
     stopBtnTitle: "Экстренная остановка — немедленно заблокировать все вызовы инструментов. Сессии и контекст сохраняются; возобновление кнопкой или новым промптом.",
     logStopOn: "ЭКСТРЕННАЯ ОСТАНОВКА — агенты заблокированы",
     logStopOff: "экстренная остановка снята",
+    drawerClose: "Закрыть",
+    drawerCloseTitle: "Закрыть панель (Esc)",
+    drawerCurrentTask: "Текущая задача",
+    drawerHistory: "История",
+    drawerLoading: "загрузка…",
+    drawerNoHistory: "Запусков пока не было",
+    drawerWorking: "в работе",
+    drawerNoStart: "старт не записан",
+    drawerRuns: ["запуск", "запуска", "запусков"],
+    drawerErrors: ["ошибка", "ошибки", "ошибок"],
+    drawerAvg: "среднее {d}",
+    drawerStats: "{runs} · {errors} · {avg}",
+    drawerStateIdle: "без задач",
+    drawerStateError: "ошибка",
   },
 };
 var UI_MSG = MESSAGES[UI_LANG] || MESSAGES.en;
@@ -409,6 +437,11 @@ function render() {
       '<span class="agent-name">' + shortName(name) + "</span>" +
       (instances ? '<span class="agent-instances">×' + instances + "</span>" : "") +
       '<div class="agent-tooltip">' + tips + "</div>";
+    // `name` is a loop-scoped `var` — capture it per figure for the click.
+    (function(n, room) {
+      el.classList.add("agent--clickable");
+      el.addEventListener("click", function() { toggleAgentDrawer(n, room); });
+    })(name, agent.room);
     roomEl.appendChild(el);
   }
 
@@ -663,6 +696,175 @@ function addWaitingLogEntry(message) {
 
 var historyLoaded = false;
 
+// ── Agent drill-down drawer ──
+// Click a figure → bottom drawer with the agent's current task, run stats and
+// history. The extension answers agent_detail_request and keeps pushing fresh
+// details on every state change while the drawer stays open.
+var drawerAgent = null;
+var drawerRoom = null;
+var drawerDetail = null;
+
+function toggleAgentDrawer(name, room) {
+  if (drawerAgent === name) closeAgentDrawer();
+  else openAgentDrawer(name, room);
+}
+
+function openAgentDrawer(name, room) {
+  drawerAgent = name;
+  drawerRoom = room || null;
+  drawerDetail = null;
+  renderAgentDrawer();
+  vscode.postMessage({ type: "agent_detail_request", name: name });
+}
+
+function closeAgentDrawer() {
+  drawerAgent = null;
+  drawerDetail = null;
+  renderAgentDrawer();
+  vscode.postMessage({ type: "agent_detail_close" });
+}
+
+function drawerStateLabel(state) {
+  if (!state) return tr("drawerStateIdle");
+  if (state.state === "working") return tr("labelWorking");
+  if (state.state === "done") return tr("labelDone");
+  if (state.state === "error") return tr("drawerStateError");
+  return tr("drawerStateIdle");
+}
+
+function drawerDuration(run) {
+  if (!run.startedAt) return "";
+  if (!run.endedAt) return tr("drawerWorking") + "…";
+  var mins = (Date.parse(run.endedAt) - Date.parse(run.startedAt)) / 60000;
+  if (isNaN(mins) || mins < 0) return "";
+  if (mins < 1) return "<1" + tr("unitMin");
+  return formatDuration(mins);
+}
+
+// Everything user-sourced (agent names, task texts) goes in via textContent.
+function renderAgentDrawer() {
+  var drawer = document.getElementById("agent-drawer");
+  if (!drawer) return;
+  if (!drawerAgent) {
+    drawer.hidden = true;
+    drawer.innerHTML = "";
+    return;
+  }
+  drawer.hidden = false;
+  drawer.innerHTML = "";
+
+  var detail = drawerDetail;
+  var state = detail && detail.state;
+  var room = (state && state.room) || drawerRoom || "lobby";
+
+  var header = document.createElement("div");
+  header.className = "drawer-header";
+  var icon = document.createElement("span");
+  icon.className = "agent-icon drawer-icon";
+  icon.innerHTML = getAgentIcon(drawerAgent, room); // our own SVG set, not user data
+  var titleBox = document.createElement("div");
+  titleBox.className = "drawer-title";
+  var nameEl = document.createElement("div");
+  nameEl.className = "drawer-name";
+  nameEl.textContent = drawerAgent;
+  var subEl = document.createElement("div");
+  subEl.className = "drawer-sub";
+  subEl.textContent = roomLabel(room) + " · " + drawerStateLabel(state) +
+    (state && state.activeCount > 1 ? " · ×" + state.activeCount : "");
+  titleBox.appendChild(nameEl);
+  titleBox.appendChild(subEl);
+  var closeBtn = document.createElement("button");
+  closeBtn.className = "drawer-close";
+  closeBtn.type = "button";
+  closeBtn.textContent = "✕";
+  closeBtn.title = tr("drawerCloseTitle");
+  closeBtn.setAttribute("aria-label", tr("drawerClose"));
+  closeBtn.addEventListener("click", closeAgentDrawer);
+  header.appendChild(icon);
+  header.appendChild(titleBox);
+  header.appendChild(closeBtn);
+  drawer.appendChild(header);
+
+  if (state && state.task) {
+    var taskLabel = document.createElement("div");
+    taskLabel.className = "drawer-section-label";
+    taskLabel.textContent = tr("drawerCurrentTask");
+    var taskEl = document.createElement("div");
+    taskEl.className = "drawer-task";
+    taskEl.textContent = state.task;
+    drawer.appendChild(taskLabel);
+    drawer.appendChild(taskEl);
+  }
+
+  var histLabel = document.createElement("div");
+  histLabel.className = "drawer-section-label";
+  histLabel.textContent = tr("drawerHistory");
+  drawer.appendChild(histLabel);
+
+  if (!detail) {
+    var loading = document.createElement("div");
+    loading.className = "drawer-empty";
+    loading.textContent = tr("drawerLoading");
+    drawer.appendChild(loading);
+    return;
+  }
+
+  var runs = detail.runs || [];
+  if (runs.length === 0) {
+    var empty = document.createElement("div");
+    empty.className = "drawer-empty";
+    empty.textContent = tr("drawerNoHistory");
+    drawer.appendChild(empty);
+    return;
+  }
+
+  var finished = runs.filter(function(r) { return r.endedAt && r.startedAt; });
+  var errorCount = runs.filter(function(r) { return r.result === "error"; }).length;
+  if (finished.length > 0) {
+    var totalMs = finished.reduce(function(sum, r) {
+      return sum + Math.max(0, Date.parse(r.endedAt) - Date.parse(r.startedAt));
+    }, 0);
+    var stats = document.createElement("div");
+    stats.className = "drawer-stats";
+    stats.textContent = tr("drawerStats", {
+      runs: trCount("drawerRuns", runs.length),
+      errors: trCount("drawerErrors", errorCount),
+      avg: tr("drawerAvg", { d: formatDuration(totalMs / finished.length / 60000) }),
+    });
+    drawer.appendChild(stats);
+  }
+
+  var list = document.createElement("div");
+  list.className = "drawer-history";
+  for (var i = 0; i < runs.length; i++) {
+    (function(run) {
+      var row = document.createElement("div");
+      row.className = "drawer-run" +
+        (run.result === "error" ? " drawer-run--error" : !run.endedAt ? " drawer-run--working" : "");
+      var time = document.createElement("span");
+      time.className = "drawer-run-time";
+      time.textContent = run.startedAt ? formatTime(run.startedAt) : tr("drawerNoStart");
+      var dur = document.createElement("span");
+      dur.className = "drawer-run-dur";
+      dur.textContent = (run.result === "error" ? "⚠ " : "") + drawerDuration(run);
+      row.appendChild(time);
+      row.appendChild(dur);
+      if (run.task) {
+        var task = document.createElement("div");
+        task.className = "drawer-run-task";
+        task.textContent = run.task;
+        row.appendChild(task);
+      }
+      list.appendChild(row);
+    })(runs[i]);
+  }
+  drawer.appendChild(list);
+}
+
+document.addEventListener("keydown", function(e) {
+  if (e.key === "Escape" && drawerAgent) closeAgentDrawer();
+});
+
 window.addEventListener("message", function(evt) { // noqa: secret
   var msg = evt.data;
   if (msg.type === "full_state") {
@@ -699,6 +901,11 @@ window.addEventListener("message", function(evt) { // noqa: secret
     stopActive = !!msg.active;
     if (wasStopped !== stopActive) addStopLogEntry(stopActive);
     renderStop();
+  } else if (msg.type === "agent_detail") {
+    if (drawerAgent && msg.detail && msg.detail.name === drawerAgent) {
+      drawerDetail = msg.detail;
+      renderAgentDrawer();
+    }
   }
 });
 

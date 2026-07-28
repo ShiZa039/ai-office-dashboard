@@ -265,7 +265,7 @@
     "bundle": "esbuild src/extension.ts --bundle --outfile=out/src/extension.js --external:vscode --format=cjs --platform=node --target=node18 --minify",
     "watch": "tsc -watch -p ./",
     "lint": "eslint src --ext ts",
-    "test": "tsc -p ./ && node out/test/eventParser.test.js && node out/test/types.test.js && node out/test/agentState.test.js && node out/test/hookConfig.test.js && node out/test/hookConfigKimi.test.js && node out/test/subscriptionUsage.test.js && node out/test/kimiUsage.test.js && node out/test/agentRoster.test.js && node out/test/emitAgentEvent.test.js && node out/test/stopFlag.test.js && node out/test/configMigration.test.js"
+    "test": "tsc -p ./ && node out/test/eventParser.test.js && node out/test/types.test.js && node out/test/agentState.test.js && node out/test/agentDetail.test.js && node out/test/hookConfig.test.js && node out/test/hookConfigKimi.test.js && node out/test/subscriptionUsage.test.js && node out/test/kimiUsage.test.js && node out/test/agentRoster.test.js && node out/test/emitAgentEvent.test.js && node out/test/stopFlag.test.js && node out/test/configMigration.test.js"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

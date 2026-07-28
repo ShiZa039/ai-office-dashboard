@@ -51,6 +51,24 @@ export interface SessionWaiting {
   since: string;
 }
 
+/** One lifecycle of an agent: a start paired (FIFO) with its stop. */
+export interface AgentRun {
+  /** null when only the stop was seen (its start fell out of the history cap). */
+  startedAt: string | null;
+  /** null while the run is still open (agent working). */
+  endedAt: string | null;
+  task?: string;
+  /** 'error' when the stop reported a failure; undefined = success/unknown. */
+  result?: string;
+}
+
+/** Drill-down payload for one agent: current state + paired run history. */
+export interface AgentDetail {
+  name: string;
+  state: AgentState | null;
+  runs: AgentRun[];
+}
+
 /** Message sent from extension to webview */
 export type WebviewMessage =
   | {
@@ -64,7 +82,9 @@ export type WebviewMessage =
   | { type: 'usage_update'; data: { subscription: unknown; cost: unknown } }
   | { type: 'usage_error'; source: 'subscription' | 'cost'; message: string }
   /** Emergency-stop flag state for this window (dashboard button + banner). */
-  | { type: 'stop_state'; active: boolean; since: string | null };
+  | { type: 'stop_state'; active: boolean; since: string | null }
+  /** Drill-down answer for the agent drawer. */
+  | { type: 'agent_detail'; detail: AgentDetail };
 
 /**
  * Curated room ids with icons/labels/colors in the webview (media/icons.js,
