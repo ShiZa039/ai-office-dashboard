@@ -70,63 +70,6 @@ body {
   flex: 1;
 }
 
-/* ── Session selector ── */
-.session-selector {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  flex-shrink: 0;
-}
-
-.session-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 1px 6px;
-  border-radius: 8px;
-  font-size: 9px;
-  font-family: var(--vscode-editor-font-family, monospace);
-  cursor: pointer;
-  border: 1px solid var(--room-border);
-  background: transparent;
-  color: var(--text-secondary);
-  transition: all 0.2s ease;
-  white-space: nowrap;
-}
-
-.session-btn:hover {
-  border-color: var(--text-secondary);
-  color: var(--text-primary);
-}
-
-.session-btn--active {
-  border-color: var(--blue);
-  color: var(--text-primary);
-  background: var(--blue-dim);
-}
-
-.session-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  display: inline-block;
-  flex-shrink: 0;
-}
-
-.session-dot--pulse {
-  animation: statusPulse 2s ease infinite;
-}
-
-/* ── Agent session indicator ── */
-.agent-session-dot {
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  display: inline-block;
-  flex-shrink: 0;
-  margin-right: 1px;
-}
-
 .idle-toggle {
   font-size: 9px;
   font-family: inherit;
@@ -861,4 +804,168 @@ body {
 @keyframes logSlide {
   from { opacity: 0; transform: translateY(-3px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Agent drill-down drawer ── */
+.agent-drawer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  max-height: 65vh;
+  overflow-y: auto;
+  background: var(--room-bg);
+  border-top: 1px solid var(--room-border);
+  box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.45);
+  padding: 10px 12px 12px;
+  animation: drawerIn 0.18s ease-out;
+}
+
+@keyframes drawerIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.agent-drawer::-webkit-scrollbar { width: 3px; }
+.agent-drawer::-webkit-scrollbar-thumb { background: #444; border-radius: 2px; }
+
+.agent--clickable {
+  cursor: pointer;
+}
+
+.drawer-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.drawer-icon {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+}
+
+.drawer-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.drawer-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.drawer-name {
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.drawer-sub {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.drawer-close {
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid var(--room-border);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px 7px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.drawer-close:hover {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
+.drawer-section-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  margin: 8px 0 4px;
+}
+
+.drawer-task {
+  font-size: 12px;
+  background: var(--bg);
+  border: 1px solid var(--room-border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.drawer-stats {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.drawer-empty {
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 4px 0 6px;
+}
+
+.drawer-history {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.drawer-run {
+  display: grid;
+  grid-template-columns: 62px 64px 1fr;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 11px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: var(--bg);
+  border: 1px solid var(--room-border);
+  animation: logSlide 0.15s ease-out;
+}
+
+.drawer-run--working {
+  border-color: var(--blue);
+}
+
+.drawer-run--error {
+  border-color: var(--red, #ef4444);
+}
+
+.drawer-run-time {
+  font-family: var(--vscode-editor-font-family, 'Cascadia Code', monospace);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.drawer-run-dur {
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.drawer-run--working .drawer-run-dur {
+  color: var(--blue);
+}
+
+.drawer-run--error .drawer-run-dur {
+  color: #f87171;
+}
+
+.drawer-run-task {
+  grid-column: 1 / -1;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
 }

@@ -4,7 +4,7 @@
 
 > A VSCode extension that visualizes Claude Code and Kimi Code CLI activity as an office floor map. Every subagent shows up as a figure in its own "room" (Backend, Frontend, QA, Security, DevOps, AI-lab, etc.), pulses while working, and gets a checkmark when done. On top: a main-model indicator, subscription usage limits, and an emergency stop button.
 
-**Current version:** `v0.14.0` · zero-config: dual CLI support (Claude Code + Kimi Code), automatic hook installation, agent auto-discovery, dynamic rooms, real Pro/Max plan limits, agent emergency stop, en/ru UI.
+**Current version:** `v0.15.0` · zero-config: dual CLI support (Claude Code + Kimi Code), automatic hook installation, agent auto-discovery, dynamic rooms, real Pro/Max plan limits, agent emergency stop, en/ru UI.
 
 ---
 
@@ -27,7 +27,7 @@ When you orchestrate several subagents in parallel, you lose track of who is doi
 1. Install the `.vsix`:
 
    ```
-   code --install-extension ai-office-dashboard-0.14.0.vsix --force
+   code --install-extension ai-office-dashboard-0.15.0.vsix --force
    ```
 
 2. Reload Window → a house icon appears in the Activity Bar.
@@ -141,6 +141,7 @@ Release history and plans — [ROADMAP.md](ROADMAP.md) (in Russian).
 - `SubagentStart` does not pass `description`/`prompt` ([anthropics/claude-code#19170](https://github.com/anthropics/claude-code/issues/19170)) — the `task` field is filled from `last_assistant_message` on `agent_stop`.
 - The subscription limits endpoint is undocumented (the same one `/usage` in Claude Code uses) — the format may change; the parser is resilient to missing fields.
 - The emergency stop does not interrupt a tool call that is already running — only subsequent calls are blocked.
+- Kimi Code does not fire hooks in non-interactive mode (`kimi --print` / `kimi -p`) — neither dashboard events nor the emergency stop apply to such runs (verified on kimi 1.30.0).
 - The usage panels (Plan usage limits and ccusage $-bars) are Claude Code only — Kimi Code has no equivalent local API.
 - Sound effects are not planned.
 

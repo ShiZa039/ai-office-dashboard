@@ -35,7 +35,9 @@ const TRANSCRIPT_TAIL_BYTES = 256 * 1024;
 
 const STOP_REASON =
   'AI Office: EMERGENCY STOP activated by the user from the dashboard. ' +
-  'Do not call any more tools. End the turn immediately.';
+  'Do not call any more tools. End the turn immediately with a brief ' +
+  'handoff note: what was done, what remains, and the next step to ' +
+  'resume from.';
 
 const CLI = process.argv[3] === 'kimi' ? 'kimi' : 'claude';
 
@@ -60,7 +62,8 @@ function allStopFlagPaths() {
 /** Parsed active stop flag, or null (missing / malformed / inactive). */
 function loadStopFlag(flagPath) {
   try {
-    const flag = JSON.parse(fs.readFileSync(flagPath, 'utf-8').trim());
+    // Strip a possible BOM (hand-edited flag files saved as UTF-8 with BOM).
+    const flag = JSON.parse(fs.readFileSync(flagPath, 'utf-8').replace(/^\uFEFF/, '').trim());
     return flag && typeof flag === 'object' && flag.active ? flag : null;
   } catch (e) {
     return null;

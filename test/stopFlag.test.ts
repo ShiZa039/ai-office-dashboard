@@ -156,8 +156,6 @@ if (process.platform === 'win32') {
   );
 }
 
-console.log('All stopFlag tests passed.');
-
 // --- stopFlagPaths: one flag file per agent CLI ---
 
 {
@@ -166,3 +164,5 @@ console.log('All stopFlag tests passed.');
   assert.ok(paths[0].endsWith(path.join('.claude', 'office-stop.json')), 'claude flag path');
   assert.ok(paths[1].endsWith(path.join('.kimi-code', 'office-stop.json')), 'kimi flag path');
 }
+
+console.log('All stopFlag tests passed.');

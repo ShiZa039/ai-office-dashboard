@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { AgentState, SessionWaiting } from '../types';
+import { AgentDetail, AgentState, SessionWaiting } from '../types';
 import { uiLocale } from '../locale';
 
 interface WebviewSlot {
@@ -38,6 +38,10 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
 
   /** Callback invoked when the user hits the emergency-stop / resume button. */
   onToggleStop?: () => void;
+
+  /** Callbacks for the agent drill-down drawer. */
+  onAgentDetailRequest?: (name: string) => void;
+  onAgentDetailClose?: () => void;
 
   resolveWebviewView(
     webviewView: vscode.WebviewView,
@@ -114,6 +118,11 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
     this.broadcast({ type: 'stop_state', active, since });
   }
 
+  /** Answer a drill-down request (also re-sent on state changes while open). */
+  sendAgentDetail(detail: AgentDetail): void {
+    this.broadcast({ type: 'agent_detail', detail });
+  }
+
   updateSubscription(data: unknown): void {
     const provider =
       data && typeof data === 'object' && typeof (data as { provider?: unknown }).provider === 'string'
@@ -163,6 +172,14 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
     webview.onDidReceiveMessage((msg) => {
       if (msg.type === 'toggle_stop') {
         this.onToggleStop?.();
+        return;
+      }
+      if (msg.type === 'agent_detail_request') {
+        if (typeof msg.name === 'string' && msg.name) this.onAgentDetailRequest?.(msg.name);
+        return;
+      }
+      if (msg.type === 'agent_detail_close') {
+        this.onAgentDetailClose?.();
         return;
       }
       if (msg.type !== 'webview_ready') return;

@@ -33,7 +33,9 @@ TRANSCRIPT_TAIL_BYTES = 256 * 1024
 
 STOP_REASON = (
     "AI Office: EMERGENCY STOP activated by the user from the dashboard. "
-    "Do not call any more tools. End the turn immediately."
+    "Do not call any more tools. End the turn immediately with a brief "
+    "handoff note: what was done, what remains, and the next step to "
+    "resume from."
 )
 
 CLI = "kimi" if len(sys.argv) > 2 and sys.argv[2] == "kimi" else "claude"
@@ -280,4 +282,7 @@ def main():
         release_stop_flag(cwd)
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        pass  # A hook must never fail the agent CLI session.

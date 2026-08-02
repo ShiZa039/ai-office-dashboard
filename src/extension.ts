@@ -11,6 +11,7 @@ import { kimiUsageProvider } from './kimiUsage';
 import { discoverProjectAgents } from './agentRoster';
 import { ensureHooksOnActivation, installHooks } from './hookInstaller';
 import { MAIN_AGENT_NAME, getRoomForAgent } from './types';
+import { buildAgentRuns } from './agentDetail';
 import { isRussianUi } from './locale';
 import { migrateLegacyConfiguration } from './configMigration';
 import {
@@ -267,6 +268,20 @@ export function activate(context: vscode.ExtensionContext) {
     if (!store) return;
     provider.updateAgents(store.getSnapshot(), store.getModel(), store.getWaiting());
     updateStatusBar();
+    pushAgentDetail();
+  };
+
+  // Agent drill-down: the drawer in the webview requests one agent's detail;
+  // while it's open we re-push the detail on every state change (live view).
+  let detailAgent: string | null = null;
+  const pushAgentDetail = () => {
+    if (!store || !detailAgent) return;
+    const snapshot = store.getSnapshot();
+    provider.sendAgentDetail({
+      name: detailAgent,
+      state: snapshot[detailAgent] ?? null,
+      runs: buildAgentRuns(store.getRecentEvents(), detailAgent),
+    });
   };
 
   store.onChange = broadcastState;
@@ -284,6 +299,13 @@ export function activate(context: vscode.ExtensionContext) {
 
   provider.onReady = broadcastState;
   provider.onToggleStop = toggleStop;
+  provider.onAgentDetailRequest = (name) => {
+    detailAgent = name;
+    pushAgentDetail();
+  };
+  provider.onAgentDetailClose = () => {
+    detailAgent = null;
+  };
 
   // Pick up flag changes from other windows and the user_prompt auto-release
   // in the hook script. watchFile polls, so it also survives file re-creation.
