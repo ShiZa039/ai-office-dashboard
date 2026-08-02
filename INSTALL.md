@@ -24,12 +24,12 @@ The extension visualizes Claude Code and Kimi Code CLI subagent activity as an "
    ```powershell
    # Windows
    & 'C:\Users\<user>\AppData\Local\Programs\Microsoft VS Code\bin\code.cmd' `
-     --install-extension 'D:\path\to\ai-office-dashboard-0.14.0.vsix' --force
+     --install-extension 'D:\path\to\ai-office-dashboard-0.15.0.vsix' --force
    ```
 
    ```bash
    # Linux/macOS
-   code --install-extension /path/to/ai-office-dashboard-0.14.0.vsix --force
+   code --install-extension /path/to/ai-office-dashboard-0.15.0.vsix --force
    ```
 
 2. `Ctrl+Shift+P` → **Developer: Reload Window**.

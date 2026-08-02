@@ -1,6 +1,6 @@
 # Roadmap — AI Office
 
-История релизов и план развития. Текущая версия — `v0.14.0`.
+История релизов и план развития. Текущая версия — `v0.15.0`.
 
 > This file is maintained in Russian only (internal dev history). User-facing docs are bilingual: [README.md](README.md) / [README.ru.md](README.ru.md), [INSTALL.md](INSTALL.md) / [INSTALL.ru.md](INSTALL.ru.md).
 
@@ -220,6 +220,36 @@
 - Usage-панели (Plan usage / ccusage) остаются Claude-only — у Kimi нет эквивалентного
   локального API лимитов
 
+### v0.15.0 — drill-down по агенту + волна по итогам код-обзора (review wave)
+- Drill-down: клик на фигурку агента открывает drawer с его историей прогонов
+  (пары start/stop, FIFO при параллельных инстансах) и текущей задачей
+  (`src/agentDetail.ts`, коммит `e3ce594`)
+- Экстренная остановка: `STOP_REASON` теперь велит агенту завершить ход краткой
+  handoff-заметкой (что сделано / что осталось / следующий шаг) — под стопом файлы
+  писать нельзя, а финальное сообщение сохраняется в логе задачи (проверено живым
+  боевым тестом: 4 агента без предупреждений остановились по тексту причины)
+- Паритет хук-скриптов py/js: JS научился терпеть BOM в `office-stop.json`,
+  Python получил верхний try/catch («хук никогда не должен ронять сессию CLI»)
+- `eventWatcher.ts`: ротация журнала событий на старте (файл > 5 МБ → оставляется
+  хвост 1 МБ с выравниванием по границе строки), детект пересоздания файла по
+  dev/ino (сброс позиции чтения), инжектируемые опции (pollMs, rotate-капы)
+- Webview: тултип фигурки пересобран на `textContent` (host-данные больше не идут
+  через `innerHTML`), удалены осиротевшие стили селектора сессий (~60 строк),
+  кэп 500 семплов в `usageHistory`, `render()` пропускает пересборку фигурок при
+  неизменной JSON-подписи состояния (нет мерцания на каждое событие)
+- Тип `agent_update` удалён из `WebviewMessage` (всегда шлётся `full_state`)
+- Тесты: новый интеграционный `emitAgentEventPy.test.ts` (Python-хук прогоняется
+  по тем же сценариям, что и JS — страховка от дрейфа реализаций; skip без
+  Python 3), `eventWatcher.test.ts` (offset/leftover/UTF-8/truncate/recreate/
+  ротация), `hookInstaller.test.ts` (resolveTargets, checkHookStatus);
+  фикс `stopFlag.test.ts` (console.log переехал в конец файла)
+- ESLint покрывает теперь `src`, `test` и `hooks` (scoped overrides)
+- Документация код-обзора в репозитории: `ARCH-REVIEW.md`, `TEST-ANALYSIS.md`,
+  `UI-REVIEW.md`, `HOOKS-DESIGN.md` (на русском, для разработчиков)
+- Известное ограничение задокументировано: Kimi Code не вызывает хуки в
+  неинтерактивном режиме (`kimi --print`) — стоп и события на такие запуски не
+  действуют
+
 ---
 
 ## В планах
@@ -240,11 +270,11 @@
 - [x] Локализация package.json (`package.nls.json` / `package.nls.ru.json`): команды и описания настроек en/ru в UI VSCode (2026-07-20).
 - [x] ESLint-конфиг (`.eslintrc.json`) — `npm run lint` раньше падал без конфигурации; сейчас проходит чисто (2026-07-20).
 - [ ] Smoke-тест: установка `.vsix` в headless VSCode.
-- [ ] Покрытие тестами `eventWatcher.ts` (сейчас не покрыт — fs.watch сложно мокать).
+- [x] Покрытие тестами `eventWatcher.ts` — сделано в v0.15.0 (`test/eventWatcher.test.ts`: offset/leftover/UTF-8/truncate/recreate/ротация).
 
 ### Идеи на потом
 
-- [ ] **Drill-down по агенту** — клик на фигурку → панель с историей этого агента + текущей задачей.
+- [x] **Drill-down по агенту** — сделано в v0.15.0: клик на фигурку → drawer с историей прогонов агента и текущей задачей (`src/agentDetail.ts`).
 - [ ] **Иерархия агентов** — кто кого заспавнил (оркестратор + сабагенты), если хуки дадут parent id.
 - [ ] **Replay дня** — ползунок перемотки офиса по JSONL-логу.
 - [ ] **Метрики агентов** — среднее время работы, success/error rate, топ занятых комнат.

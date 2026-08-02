@@ -379,7 +379,29 @@ function setModel(model) {
   }
 }
 
+// Signature of everything render() paints; full_state arrives on every hook
+// event but the figures rarely change, so unchanged snapshots skip the DOM
+// rebuild (avoids visible flicker). The event-log diff in the message
+// handler runs before render(), so skipping here loses nothing.
+var lastRenderSignature = null;
+
+function renderSignature() {
+  var parts = [
+    hideIdle ? "1" : "0",
+    String(completedCount),
+    currentWaiting ? "1" : "0",
+  ];
+  Object.keys(currentAgents).sort().forEach(function(n) {
+    var a = currentAgents[n];
+    parts.push([n, a.state, a.room, a.task, a.activeCount, a.lastActivity]);
+  });
+  return JSON.stringify(parts);
+}
+
 function render() {
+  var sig = renderSignature();
+  if (sig === lastRenderSignature) return;
+  lastRenderSignature = sig;
   // noqa: secret
   // The floor holds exactly the rooms the current agents occupy.
   var neededRooms = {};
@@ -428,15 +450,47 @@ function render() {
 
     var instances = agent.state === "working" && agent.activeCount > 1 ? agent.activeCount : 0;
 
-    var tips = '<div class="tooltip-name">' + name + (instances ? " ×" + instances : "") + "</div>";
-    if (agent.task) tips += '<div class="tooltip-task">' + agent.task + "</div>";
-    if (agent.lastActivity) tips += '<div class="tooltip-time">' + formatTime(agent.lastActivity) + "</div>";
+    // Everything host-supplied (agent name, task, activity time) goes in via
+    // textContent — same rule as the drawer. Only the avatar SVG is innerHTML,
+    // and that comes from our own trusted local registry.
+    var icon = document.createElement("span");
+    icon.className = "agent-icon";
+    icon.innerHTML = getAgentIcon(name, agent.room);
+    el.appendChild(icon);
 
-    el.innerHTML =
-      '<span class="agent-icon">' + getAgentIcon(name, agent.room) + "</span>" +
-      '<span class="agent-name">' + shortName(name) + "</span>" +
-      (instances ? '<span class="agent-instances">×' + instances + "</span>" : "") +
-      '<div class="agent-tooltip">' + tips + "</div>";
+    var nameEl = document.createElement("span");
+    nameEl.className = "agent-name";
+    nameEl.textContent = shortName(name);
+    el.appendChild(nameEl);
+
+    if (instances) {
+      var instEl = document.createElement("span");
+      instEl.className = "agent-instances";
+      instEl.textContent = "×" + instances;
+      el.appendChild(instEl);
+    }
+
+    // Keep the .agent-tooltip wrapper (and its children) on the same CSS
+    // classes so the arrow pseudo-element and hover rule still apply.
+    var tooltip = document.createElement("div");
+    tooltip.className = "agent-tooltip";
+    var tipName = document.createElement("div");
+    tipName.className = "tooltip-name";
+    tipName.textContent = name + (instances ? " ×" + instances : "");
+    tooltip.appendChild(tipName);
+    if (agent.task) {
+      var tipTask = document.createElement("div");
+      tipTask.className = "tooltip-task";
+      tipTask.textContent = agent.task;
+      tooltip.appendChild(tipTask);
+    }
+    if (agent.lastActivity) {
+      var tipTime = document.createElement("div");
+      tipTime.className = "tooltip-time";
+      tipTime.textContent = formatTime(agent.lastActivity);
+      tooltip.appendChild(tipTime);
+    }
+    el.appendChild(tooltip);
     // `name` is a loop-scoped `var` — capture it per figure for the click.
     (function(n, room) {
       el.classList.add("agent--clickable");
@@ -1020,6 +1074,9 @@ function resetText(resetsAt) {
 var USAGE_HISTORY_KEY = "aiOffice.usageHistory";
 var USAGE_HISTORY_WINDOW_MS = 90 * 60000;
 var USAGE_FORECAST_MIN_SPAN_MS = 10 * 60000;
+// Hard cap per limit kind: the 90-minute window alone can't bound the array
+// if updates arrive pathologically often.
+var USAGE_HISTORY_MAX_SAMPLES = 500;
 var usageHistory = {}; // kind -> [{t, pct}]
 try {
   var savedHist = readStorageKey(USAGE_HISTORY_KEY, "claudeOffice.usageHistory");
@@ -1041,6 +1098,7 @@ function recordUsageSamples(sub, prefix) {
     if (last && lim.utilization < last.pct - 5) arr.length = 0;
     arr.push({ t: t, pct: lim.utilization });
     while (arr.length > 0 && t - arr[0].t > USAGE_HISTORY_WINDOW_MS) arr.shift();
+    while (arr.length > USAGE_HISTORY_MAX_SAMPLES) arr.shift();
     changed = true;
   }
   if (changed) {

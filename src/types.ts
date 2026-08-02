@@ -72,7 +72,7 @@ export interface AgentDetail {
 /** Message sent from extension to webview */
 export type WebviewMessage =
   | {
-      type: 'agent_update' | 'full_state';
+      type: 'full_state';
       agents: Record<string, AgentState>;
       /** Session model ID; null until any event carries one. */
       model?: string | null;
