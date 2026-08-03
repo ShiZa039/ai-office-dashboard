@@ -20,6 +20,7 @@
 
 - `src/extension.ts` — точка входа, команды, вебвью-провайдер.
 - `src/hookConfig.ts` / `src/hookConfigKimi.ts` — чистая логика регистрации хуков (без `vscode`); клей с ФС/UI — `src/hookInstaller.ts`.
+- `src/subscriptionUsage.ts` / `src/kimiUsage.ts` — OAuth-пробы квот планов (Claude/Kimi), 429-backoff; `src/usagePace.ts` — pace-модель (burn rate vs окно). Протоколы и боевой опыт: `docs/USAGE-PROVIDERS.md`.
 - `hooks/emit-agent-event.{py,js}` — хук-скрипты, эмитят события в `~/.claude/agent-events.jsonl`; гейт аварийной остановки (`stop_gate`).
 - `src/eventWatcher.ts` + `src/eventParser.ts` — приёмная сторона JSONL.
 - `src/agentState.ts` / `src/agentRoster.ts` / `src/agentDetail.ts` — модель агентов на дашборде.

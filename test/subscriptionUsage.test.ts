@@ -1,5 +1,11 @@
 import * as assert from 'assert';
-import { parseCredentials, parseUsageResponse } from '../src/subscriptionUsage';
+import {
+  parseCredentials,
+  parseUsageResponse,
+  SubscriptionUsageWatcher,
+  throttleDelayMs,
+  UsageProviderConfig,
+} from '../src/subscriptionUsage';
 
 // --- parseCredentials ---
 
@@ -134,4 +140,57 @@ assert.strictEqual(
   'non-numeric utilization rejected',
 );
 
-console.log('All subscriptionUsage tests passed.');
+// --- throttleDelayMs (429 backoff policy, docs/USAGE-PROVIDERS.md §1) ---
+
+assert.strictEqual(throttleDelayMs('120', 0), 120_000, 'honours Retry-After seconds');
+assert.strictEqual(throttleDelayMs('0', 0), 60_000, 'Retry-After: 0 (server bug) → fallback');
+assert.strictEqual(throttleDelayMs(null, 0), 60_000, 'no header → start at 60s');
+assert.strictEqual(throttleDelayMs(null, 60_000), 120_000, 'fallback doubles on repeat');
+assert.strictEqual(throttleDelayMs(null, 30 * 60_000), 30 * 60_000, 'fallback capped at 30 min');
+assert.strictEqual(throttleDelayMs('99999', 0), 30 * 60_000, 'Retry-After capped at 30 min too');
+{
+  const httpDate = new Date(Date.now() + 90_000).toUTCString();
+  const d = throttleDelayMs(httpDate, 0);
+  assert.ok(d > 60_000 && d <= 90_000, 'HTTP-date Retry-After honoured');
+}
+
+// --- watcher stays silent inside the Retry-After window ---
+
+async function watcherBackoffScenario(): Promise<void> {
+  let fetchCalls = 0;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    fetchCalls++;
+    return new Response('{}', { status: 429, headers: { 'retry-after': '600' } });
+  }) as typeof fetch;
+  try {
+    const cfg: UsageProviderConfig = {
+      id: 'claude',
+      url: 'https://example.test/usage',
+      headers: () => ({}),
+      readCredentials: () => ({ accessToken: 't', expiresAt: null, plan: null }),
+      parse: () => null,
+      messages: { noCredentials: null, expired: null, unauthorized: 'x' },
+    };
+    const w = new SubscriptionUsageWatcher(cfg, {
+      intervalMs: 3_600_000,
+      onUpdate: () => assert.fail('no update expected on 429'),
+      onError: () => {},
+    });
+    // tick() is private; the test reaches it structurally, like the interval does.
+    const tick = (w as unknown as { tick(): Promise<void> }).tick.bind(w);
+    await tick();
+    assert.strictEqual(fetchCalls, 1, 'first tick hits the endpoint');
+    await tick();
+    assert.strictEqual(fetchCalls, 1, 'second tick stays silent within the Retry-After window');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
+
+watcherBackoffScenario()
+  .then(() => console.log('All subscriptionUsage tests passed.'))
+  .catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });

@@ -81,11 +81,17 @@ function quotaNumbers(json: unknown): QuotaNumbers | null {
   return { used, limit, resetsAt: typeof o.resetTime === 'string' ? o.resetTime : null };
 }
 
-function windowLabel(window: unknown): string {
+/** Window length in minutes from the API's window object, if reported. */
+function windowMinutesOf(window: unknown): number | null {
   const w = window as Record<string, unknown> | null | undefined;
-  const minutes =
-    w && w.timeUnit === 'TIME_UNIT_MINUTE' && typeof w.duration === 'number' ? w.duration : null;
-  if (minutes === null || minutes <= 0) return 'Rate window';
+  return w && w.timeUnit === 'TIME_UNIT_MINUTE' && typeof w.duration === 'number' && w.duration > 0
+    ? w.duration
+    : null;
+}
+
+function windowLabel(window: unknown): string {
+  const minutes = windowMinutesOf(window);
+  if (minutes === null) return 'Rate window';
   if (minutes % 60 === 0) return `Session (${minutes / 60}h)`;
   return `Window (${minutes}m)`;
 }
@@ -115,6 +121,7 @@ export function parseKimiUsageResponse(
         label: windowLabel(l.window),
         utilization: q.limit > 0 ? clampPct(Math.round((q.used / q.limit) * 100)) : 0,
         resetsAt: q.resetsAt,
+        windowMinutes: windowMinutesOf(l.window) ?? undefined,
       });
     }
   }
@@ -127,6 +134,7 @@ export function parseKimiUsageResponse(
       utilization:
         weekly.limit > 0 ? clampPct(Math.round((weekly.used / weekly.limit) * 100)) : 0,
       resetsAt: weekly.resetsAt,
+      windowMinutes: 7 * 24 * 60,
     });
   }
 

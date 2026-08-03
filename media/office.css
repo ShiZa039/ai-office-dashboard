@@ -686,6 +686,17 @@ body {
 .usage-bar-fill--warn { background: var(--yellow); }
 .usage-bar-fill--crit { background: var(--red); }
 
+/* Pace tick: where the fill would be if the window were used evenly. */
+.usage-bar-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--text-primary);
+  opacity: 0.55;
+}
+
 .usage-bar[data-kind="weekly-opus"] .usage-bar-fill,
 .usage-bar[data-kind="weekly_scoped"] .usage-bar-fill { background: var(--purple); }
 .usage-bar[data-kind="weekly-opus"] .usage-bar-fill--warn,

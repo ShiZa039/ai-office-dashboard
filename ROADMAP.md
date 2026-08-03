@@ -250,6 +250,32 @@
   неинтерактивном режиме (`kimi --print`) — стоп и события на такие запуски не
   действуют
 
+### Unreleased — pace-модель квот + перенос опыта ClaudeBar
+_(коммит-SHA проставляется при коммите — ритуал двухфазного закрытия)_
+
+- Pace-модель квот (`src/usagePace.ts`, идея и пороги — ClaudeBar,
+  github.com/tddworks/ClaudeBar): burn rate = used% / elapsed% окна; темп
+  «горячо / по графику / с запасом» (±5 п.п.), раннее предупреждение
+  (burnRate > 1.5 и осталось <50%), абсолютные предохранители (<20%, 100%)
+- Вебвью: pace tick на каждом баре лимитов (где была бы полоска при
+  равномерном расходе окна), лейбл темпа, pace-aware цвет бара (абсолютные
+  пороги 70/90 — фолбэк)
+- Алерты на деградацию квоты (ok→warning→critical→depleted, один раз на
+  переход; настройка `aiOffice.usage.degradationAlerts`); квоты
+  `5h 12% · 7d 34%` в tooltip статус-бара
+- 429-backoff в `SubscriptionUsageWatcher`: honouring `Retry-After`
+  (секунды и HTTP-date; `Retry-After: 0` — известный баг сервера,
+  игнорируется), экспоненциальный фолбэк 60с→30макс
+- `UsageLimitEntry` += `windowMinutes` (session=300, weekly=7d; у Kimi —
+  из `window.duration` ответа API)
+- `docs/USAGE-PROVIDERS.md` — протокольный конспект донора ClaudeBar с
+  атрибуцией (OAuth-эндпоинты, pace-формулы, дедуп токенов, DEFERRED/OUT)
+- Тесты: `usagePace.test.ts` (границы окна, статусы, переходы алертов),
+  backoff-сценарий в `subscriptionUsage.test.ts` (молчание в окне
+  Retry-After)
+- Docs-drift: README обоих языков утверждали «usage — только Claude Code»,
+  хотя Kimi-панель уже работала — исправлено
+
 ---
 
 ## В планах

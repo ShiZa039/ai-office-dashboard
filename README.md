@@ -18,7 +18,7 @@ When you orchestrate several subagents in parallel, you lose track of who is doi
 - **A status bar item** — ✋ waiting / 🛑 stop / N working / errors, even while the panel is closed.
 - **A timeline** (Canvas) — who ran when, with a configurable window (5 min — 6 hours).
 - **An activity log** — the last 50 start/stop/waiting/stop-toggle events.
-- **Plan usage** — real subscription limits (Pro/Max): the 5-hour session window and weekly limits, with percentages, reset times, and a forecast like "hits 100% in ~2h at the current pace". Same API as `/usage` in Claude Code (Claude Code only — Kimi Code has no equivalent local API).
+- **Plan usage** — real subscription limits: the 5-hour session window and weekly limits, with percentages, reset times, a burn-pace indicator ("running hot / on pace / room to spare") with an even-pace tick on each bar, a forecast like "hits 100% in ~2h at the current pace", and quota degradation alerts. Same API as `/usage` in Claude Code; Kimi Code limits come from the Kimi Code API.
 - **Per-window isolation** — each VSCode window only sees its own sessions (filtered by workspace `cwd`).
 - **Localization** — en/ru UI, language taken from the OS (configurable).
 
@@ -59,7 +59,7 @@ Kimi Code hooks  ──┘          ↑                              ↑
 2. The extension watches the file (`fs.watch` + 1-second polling) and keeps agent state in memory.
 3. The webview renders the map, the timeline, and the counters; updates flow through `postMessage`, and the panel resyncs when it becomes visible again.
 4. The cwd filter (`aiOffice.scope = workspace`) drops events from other VSCode windows.
-5. The Plan usage panel polls `api.anthropic.com/api/oauth/usage` with the OAuth token of your Claude Code login (`~/.claude/.credentials.json`; Keychain on macOS). The token is never sent anywhere except the Anthropic API. This panel (and the ccusage $-bars) is Claude Code only.
+5. The Plan usage panel polls `api.anthropic.com/api/oauth/usage` with the OAuth token of your Claude Code login (`~/.claude/.credentials.json`; Keychain on macOS) and `api.kimi.com/coding/v1/usages` with your Kimi Code login (`~/.kimi-code/credentials/`). Tokens are never sent anywhere except the providers' APIs. The ccusage $-bars are Claude Code only.
 6. The emergency stop writes two flags — `~/.claude/office-stop.json` and `~/.kimi-code/office-stop.json`; the `PreToolUse` gate rejects every tool call while the flag covers the session's cwd, so one button stops both CLIs at once. Without the flag the gate exits instantly (a single file-existence check).
 7. The session model name comes from the hook payload/transcript for Claude; for Kimi sessions it falls back to `default_model` from `~/.kimi-code/config.toml`.
 
@@ -99,12 +99,13 @@ For most projects the heuristics are enough — no configuration needed.
 | `aiOffice.scope` | `workspace` | `workspace` = this window only (cwd filter); `global` = all windows |
 | `aiOffice.agentRooms` | `{}` | Custom agent-to-room mapping |
 | `aiOffice.eventsFile` | `~/.claude/agent-events.jsonl` | Path to the JSONL events file (shared by both CLIs) |
-| `aiOffice.usage.enabled` | `true` | Plan usage panel (real subscription limits, Claude Code only) |
+| `aiOffice.usage.enabled` | `true` | Plan usage panel (real subscription limits) |
 | `aiOffice.usage.pollSeconds` | `90` | Usage refresh interval |
 | `aiOffice.usage.costSource` | `off` | `ccusage` = extra $-bars via `npx ccusage` |
 | `aiOffice.usage.limitBlockUsd` | `0` | $ limit per 5-hour block (ccusage bars only) |
 | `aiOffice.usage.limitWeeklyUsd` | `0` | $ limit per week (ccusage bars only) |
 | `aiOffice.usage.limitWeeklyOpusUsd` | `0` | $ limit per week for Opus (ccusage bars only) |
+| `aiOffice.usage.degradationAlerts` | `true` | Warn when a plan quota degrades (running hot / critically low / depleted) |
 
 ## Commands
 
@@ -134,7 +135,7 @@ Release history and plans — [ROADMAP.md](ROADMAP.md) (in Russian).
 - VSCode ≥ 1.85
 - Claude Code CLI with hook support (`SubagentStart`/`SubagentStop`/`Stop`/`Notification`/`UserPromptSubmit`/`PreToolUse`) and/or Kimi Code CLI — both are supported simultaneously
 - Python 3 **or** Node.js in `PATH` (for the hook script; the extension picks whichever is available)
-- For the Plan usage panel — a Claude Code subscription login (Pro/Max). With an API key the limits panel is unavailable; you can enable $-estimates via `aiOffice.usage.costSource = "ccusage"`.
+- For the Plan usage panel — a Claude Code subscription login (Pro/Max) and/or a Kimi Code login. When Claude Code runs on an API key, its limits panel is unavailable; you can enable $-estimates via `aiOffice.usage.costSource = "ccusage"`.
 
 ## Known limitations
 
@@ -142,7 +143,7 @@ Release history and plans — [ROADMAP.md](ROADMAP.md) (in Russian).
 - The subscription limits endpoint is undocumented (the same one `/usage` in Claude Code uses) — the format may change; the parser is resilient to missing fields.
 - The emergency stop does not interrupt a tool call that is already running — only subsequent calls are blocked.
 - Kimi Code does not fire hooks in non-interactive mode (`kimi --print` / `kimi -p`) — neither dashboard events nor the emergency stop apply to such runs (verified on kimi 1.30.0).
-- The usage panels (Plan usage limits and ccusage $-bars) are Claude Code only — Kimi Code has no equivalent local API.
+- The Plan usage limits panel works for both CLIs (Claude Code and Kimi Code); the ccusage $-bars are Claude Code only.
 - Sound effects are not planned.
 
 ## License

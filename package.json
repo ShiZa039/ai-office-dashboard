@@ -169,6 +169,11 @@
           "default": 0,
           "description": "%cfg.usage.limitWeeklyOpusUsd%"
         },
+        "aiOffice.usage.degradationAlerts": {
+          "type": "boolean",
+          "default": true,
+          "description": "%cfg.usage.degradationAlerts%"
+        },
         "aiOffice.scope": {
           "type": "string",
           "enum": [
@@ -265,7 +270,7 @@
     "bundle": "esbuild src/extension.ts --bundle --outfile=out/src/extension.js --external:vscode --format=cjs --platform=node --target=node18 --minify",
     "watch": "tsc -watch -p ./",
     "lint": "eslint src test hooks --ext ts,js",
-    "test": "tsc -p ./ && node out/test/eventParser.test.js && node out/test/types.test.js && node out/test/agentState.test.js && node out/test/agentDetail.test.js && node out/test/hookConfig.test.js && node out/test/hookConfigKimi.test.js && node out/test/subscriptionUsage.test.js && node out/test/kimiUsage.test.js && node out/test/agentRoster.test.js && node out/test/emitAgentEvent.test.js && node out/test/emitAgentEventPy.test.js && node out/test/stopFlag.test.js && node out/test/configMigration.test.js && node out/test/eventWatcher.test.js && node out/test/hookInstaller.test.js && node out/test/hookWiring.test.js"
+    "test": "tsc -p ./ && node out/test/eventParser.test.js && node out/test/types.test.js && node out/test/agentState.test.js && node out/test/agentDetail.test.js && node out/test/hookConfig.test.js && node out/test/hookConfigKimi.test.js && node out/test/subscriptionUsage.test.js && node out/test/kimiUsage.test.js && node out/test/agentRoster.test.js && node out/test/emitAgentEvent.test.js && node out/test/emitAgentEventPy.test.js && node out/test/stopFlag.test.js && node out/test/configMigration.test.js && node out/test/eventWatcher.test.js && node out/test/hookInstaller.test.js && node out/test/hookWiring.test.js && node out/test/usagePace.test.js"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

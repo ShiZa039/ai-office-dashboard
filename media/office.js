@@ -106,6 +106,10 @@ var MESSAGES = {
     updatedAt: "updated {t}",
     usageError: "error: {m}",
     forecast: "⚠ {label} hits 100% in ~{d} at the current pace",
+    paceHot: "running hot",
+    paceOnPace: "on pace",
+    paceRoom: "room to spare",
+    paceTickHelp: "Where the bar would be if the window were used evenly",
     blockLeft: "{d} left",
     noActiveBlock: "no active block",
     unitMin: "m",
@@ -166,6 +170,10 @@ var MESSAGES = {
     updatedAt: "обновлено {t}",
     usageError: "ошибка: {m}",
     forecast: "⚠ {label} достигнет 100% через ~{d} при текущем темпе",
+    paceHot: "горячо",
+    paceOnPace: "по графику",
+    paceRoom: "с запасом",
+    paceTickHelp: "Где была бы полоска при равномерном расходе окна",
     blockLeft: "осталось {d}",
     noActiveBlock: "нет активного блока",
     unitMin: "м",
@@ -998,15 +1006,16 @@ function formatDuration(mins) {
   return h + tr("unitHour") + (m > 0 ? " " + m + tr("unitMin") : "");
 }
 
-function fillBar(bar, pct, valueText) {
+function fillBar(bar, pct, valueText, statusClass) {
   if (!bar) return;
   var fill = bar.querySelector(".usage-bar-fill");
   var value = bar.querySelector(".usage-bar-value");
   if (fill) {
     fill.style.width = Math.max(0, Math.min(100, pct)).toFixed(1) + "%";
     fill.classList.remove("usage-bar-fill--warn", "usage-bar-fill--crit");
-    if (pct >= 90) fill.classList.add("usage-bar-fill--crit");
-    else if (pct >= 70) fill.classList.add("usage-bar-fill--warn");
+    // Pace-aware status wins when provided; absolute thresholds are the fallback.
+    var cls = statusClass || (pct >= 90 ? "usage-bar-fill--crit" : pct >= 70 ? "usage-bar-fill--warn" : null);
+    if (cls) fill.classList.add(cls);
   }
   if (value) value.textContent = valueText;
 }
@@ -1041,6 +1050,10 @@ function ensureSubscriptionBars(section, limits, caption) {
     var fill = document.createElement("div");
     fill.className = "usage-bar-fill";
     track.appendChild(fill);
+    var tick = document.createElement("div");
+    tick.className = "usage-bar-tick";
+    tick.hidden = true;
+    track.appendChild(tick);
     var value = document.createElement("div");
     value.className = "usage-bar-value";
     value.textContent = "\u2014";
@@ -1172,7 +1185,23 @@ function renderSubSection(sectionId, sub, providerName) {
     var txt = lim.utilization.toFixed(0) + "%";
     var reset = resetText(lim.resetsAt);
     if (reset) txt += "  \u00b7  " + reset;
-    fillBar(bar, lim.utilization, txt);
+    var paceKeys = { hot: "paceHot", on_pace: "paceOnPace", room: "paceRoom" };
+    if (lim.pace && paceKeys[lim.pace]) txt += "  ·  " + tr(paceKeys[lim.pace]);
+    // Pace tick: where the fill would be if the window were used evenly.
+    var tick = bar.querySelector(".usage-bar-tick");
+    if (tick) {
+      if (typeof lim.expectedPct === "number") {
+        tick.hidden = false;
+        tick.style.left = Math.max(0, Math.min(100, lim.expectedPct)).toFixed(1) + "%";
+        tick.title = tr("paceTickHelp");
+      } else {
+        tick.hidden = true;
+      }
+    }
+    var statusClass = null;
+    if (lim.paceStatus === "critical" || lim.paceStatus === "depleted") statusClass = "usage-bar-fill--crit";
+    else if (lim.paceStatus === "warning") statusClass = "usage-bar-fill--warn";
+    fillBar(bar, lim.utilization, txt, statusClass);
   }
   return sub.fetchedAt || null;
 }

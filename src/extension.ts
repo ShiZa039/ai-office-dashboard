@@ -6,7 +6,13 @@ import { EventWatcher } from './eventWatcher';
 import { AgentStateStore } from './agentState';
 import { OfficeDashboardProvider } from './webview/provider';
 import { UsageWatcher } from './usageWatcher';
-import { SubscriptionUsageWatcher, claudeUsageProvider } from './subscriptionUsage';
+import {
+  SubscriptionSnapshot,
+  SubscriptionUsageWatcher,
+  UsageLimitEntry,
+  claudeUsageProvider,
+} from './subscriptionUsage';
+import { PaceStatus, nextAlertLevel } from './usagePace';
 import { kimiUsageProvider } from './kimiUsage';
 import { discoverProjectAgents } from './agentRoster';
 import { ensureHooksOnActivation, installHooks } from './hookInstaller';
@@ -196,6 +202,26 @@ export function activate(context: vscode.ExtensionContext) {
     refreshStopState();
   };
 
+  // Latest quota snapshots per provider (filled by handleQuotaUpdate).
+  const lastQuotas: Partial<Record<'claude' | 'kimi', SubscriptionSnapshot>> = {};
+
+  /** One compact status-bar/tooltip token per limit: "5h 12%" / "7d 34%". */
+  const compactQuota = (l: UsageLimitEntry): string => {
+    const tag =
+      l.kind === 'session' ? '5h' : l.kind.startsWith('weekly') ? '7d' : l.label.split(' ')[0];
+    return `${tag} ${l.utilization.toFixed(0)}%`;
+  };
+
+  const quotaTooltipLines = (): string | null => {
+    const lines: string[] = [];
+    for (const [id, snap] of Object.entries(lastQuotas)) {
+      if (!snap?.limits?.length) continue;
+      const parts = snap.limits.slice(0, 3).map(compactQuota);
+      lines.push(`${id === 'claude' ? 'Claude' : 'Kimi'}: ${parts.join(' · ')}`);
+    }
+    return lines.length > 0 ? lines.join('\n') : null;
+  };
+
   const updateStatusBar = () => {
     if (!store || !statusBarEnabled()) {
       statusBarItem.hide();
@@ -261,6 +287,8 @@ export function activate(context: vscode.ExtensionContext) {
       statusBarItem.hide();
       return;
     }
+    const quotaLines = quotaTooltipLines();
+    if (quotaLines) statusBarItem.tooltip = `${statusBarItem.tooltip ?? ''}\n${quotaLines}`;
     statusBarItem.show();
   };
 
@@ -363,18 +391,58 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.window.showInformationMessage('Agent events cleared');
   });
 
+  // --- Quota pace: latest snapshots, degradation alerts, status-bar quota lines ---
+
+  const lastPaceStatus = new Map<string, PaceStatus>();
+
+  const quotaAlertsEnabled = () =>
+    vscode.workspace
+      .getConfiguration('aiOffice')
+      .get<boolean>('usage.degradationAlerts', true);
+
+  const handleQuotaUpdate = (snapshot: SubscriptionSnapshot) => {
+    provider.updateSubscription(snapshot);
+    if (snapshot.provider) lastQuotas[snapshot.provider] = snapshot;
+    const ru = isRussianUi();
+    const alerts = quotaAlertsEnabled();
+    for (const lim of snapshot.limits) {
+      const key = `${snapshot.provider}:${lim.kind}`;
+      const curr = lim.paceStatus ?? 'ok';
+      const prev = lastPaceStatus.get(key) ?? 'ok';
+      lastPaceStatus.set(key, curr);
+      if (!alerts) continue;
+      const level = nextAlertLevel(prev, curr);
+      if (!level) continue;
+      const name = `${snapshot.provider === 'kimi' ? 'Kimi Code' : 'Claude Code'} ${lim.label}`;
+      const msg =
+        level === 'depleted'
+          ? ru
+            ? `${name}: лимит исчерпан`
+            : `${name}: quota depleted`
+          : level === 'critical'
+            ? ru
+              ? `${name}: осталось меньше 20% — сохраните важную работу`
+              : `${name}: under 20% left — save important work`
+            : ru
+              ? `${name}: расход опережает график окна`
+              : `${name}: usage is running ahead of the window pace`;
+      void vscode.window.showWarningMessage(`AI Office: ${msg}`);
+    }
+    updateStatusBar();
+  };
+
   const startSubscriptionWatcher = () => {
     const intervalMs = usagePollSeconds() * 1000;
     subscriptionWatcher = new SubscriptionUsageWatcher(claudeUsageProvider, {
       intervalMs,
-      onUpdate: (snapshot) => provider.updateSubscription(snapshot),
+      onUpdate: handleQuotaUpdate,
       onError: (message) => provider.reportUsageError('claude', message),
       log: (message) => log.appendLine(message),
     });
     subscriptionWatcher.start();
     kimiUsageWatcher = new SubscriptionUsageWatcher(kimiUsageProvider, {
       intervalMs,
-      onUpdate: (snapshot) => provider.updateSubscription(snapshot),
+      onUpdate: handleQuotaUpdate,
       onError: (message) => provider.reportUsageError('kimi', message),
       log: (message) => log.appendLine(message),
     });

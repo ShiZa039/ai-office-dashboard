@@ -17,6 +17,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
+import { withPace } from './usagePace';
 
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 // The endpoint expects a Claude Code user agent; other agents hit a strict rate bucket.
@@ -31,6 +32,14 @@ export interface UsageLimitEntry {
   utilization: number;
   /** ISO timestamp when this window resets, if reported. */
   resetsAt: string | null;
+  /** Window length in minutes (session=300, weekly=10080), if known. */
+  windowMinutes?: number;
+  /** % of the window already elapsed — pace-tick position (set by withPace). */
+  expectedPct?: number | null;
+  /** Burn pace vs window elapsed (set by withPace). */
+  pace?: 'hot' | 'on_pace' | 'room' | null;
+  /** Pace-aware status: absolute guardrails + early hot warning (withPace). */
+  paceStatus?: 'ok' | 'warning' | 'critical' | 'depleted';
 }
 
 export interface SubscriptionSnapshot {
@@ -77,6 +86,13 @@ function labelForKind(kind: string, scope: unknown): string {
   return kind.replace(/_/g, ' ');
 }
 
+/** Known window lengths by limit kind (5h session, 7d weekly) — for the pace model. */
+export function windowMinutesForKind(kind: string): number | undefined {
+  if (kind === 'session') return 300;
+  if (kind.startsWith('weekly')) return 7 * 24 * 60;
+  return undefined;
+}
+
 /**
  * Parse the /api/oauth/usage response defensively; null if nothing usable.
  * Prefers the `limits` array (kind/percent/resets_at, model-scoped weekly
@@ -104,6 +120,7 @@ export function parseUsageResponse(
         label: labelForKind(l.kind, l.scope),
         utilization: clampPct(l.percent),
         resetsAt: typeof l.resets_at === 'string' ? l.resets_at : null,
+        windowMinutes: windowMinutesForKind(l.kind),
       });
     }
   }
@@ -123,6 +140,7 @@ export function parseUsageResponse(
         label,
         utilization: clampPct(w.utilization),
         resetsAt: typeof w.resets_at === 'string' ? w.resets_at : null,
+        windowMinutes: windowMinutesForKind(kind),
       });
     }
   }
@@ -212,9 +230,32 @@ export interface SubscriptionWatcherOptions {
   log?: (message: string) => void;
 }
 
+/** Hard cap for any throttle delay (docs/USAGE-PROVIDERS.md §1). */
+const MAX_BACKOFF_MS = 30 * 60_000;
+
+/**
+ * How long to stay silent after an HTTP 429. Honours Retry-After (seconds or
+ * HTTP-date); `Retry-After: 0` is an observed server bug and is ignored.
+ * Without a usable header backs off exponentially from 60s, capped at 30 min.
+ * Battle experience adapted from ClaudeBar — the endpoint throttles hard.
+ */
+export function throttleDelayMs(retryAfterHeader: string | null, prevFallbackMs: number): number {
+  const sec = retryAfterHeader ? Number(retryAfterHeader) : NaN;
+  if (Number.isFinite(sec) && sec > 0) return Math.min(sec * 1000, MAX_BACKOFF_MS);
+  const date = retryAfterHeader ? Date.parse(retryAfterHeader) : NaN;
+  if (!Number.isNaN(date) && date > Date.now()) {
+    return Math.min(date - Date.now(), MAX_BACKOFF_MS);
+  }
+  return Math.min(Math.max(prevFallbackMs * 2, 60_000), MAX_BACKOFF_MS);
+}
+
 export class SubscriptionUsageWatcher {
   private timer: NodeJS.Timeout | null = null;
   private inFlight = false;
+  /** Stay silent until this epoch-ms after a 429 (Retry-After honoured). */
+  private throttledUntil = 0;
+  /** Last fallback backoff — doubles on consecutive 429s without a header. */
+  private lastBackoffMs = 0;
 
   constructor(
     private config: UsageProviderConfig,
@@ -235,6 +276,7 @@ export class SubscriptionUsageWatcher {
 
   private async tick(): Promise<void> {
     if (this.inFlight) return;
+    if (Date.now() < this.throttledUntil) return; // silent while backing off
     this.inFlight = true;
     const cfg = this.config;
     try {
@@ -254,7 +296,11 @@ export class SubscriptionUsageWatcher {
         return;
       }
       if (res.status === 429) {
-        this.opts.log?.(`[subscription:${cfg.id}] rate limited (429), will retry next poll`);
+        this.lastBackoffMs = throttleDelayMs(res.headers.get('retry-after'), this.lastBackoffMs);
+        this.throttledUntil = Date.now() + this.lastBackoffMs;
+        this.opts.log?.(
+          `[subscription:${cfg.id}] rate limited (429), backing off ${Math.round(this.lastBackoffMs / 1000)}s`,
+        );
         return; // keep last good data on screen
       }
       if (!res.ok) {
@@ -267,6 +313,9 @@ export class SubscriptionUsageWatcher {
         return;
       }
       snapshot.provider = cfg.id;
+      withPace(snapshot);
+      this.throttledUntil = 0;
+      this.lastBackoffMs = 0; // success resets the backoff
       this.opts.onUpdate(snapshot);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
