@@ -250,8 +250,7 @@
   неинтерактивном режиме (`kimi --print`) — стоп и события на такие запуски не
   действуют
 
-### Unreleased — pace-модель квот + перенос опыта ClaudeBar
-_(коммит-SHA проставляется при коммите — ритуал двухфазного закрытия)_
+### Unreleased — pace-модель квот + перенос опыта ClaudeBar (коммит `61dffa7`)
 
 - Pace-модель квот (`src/usagePace.ts`, идея и пороги — ClaudeBar,
   github.com/tddworks/ClaudeBar): burn rate = used% / elapsed% окна; темп
