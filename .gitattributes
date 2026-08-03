@@ -1,0 +1,12 @@
+# ADR-0001 / gotcha-gitattributes: проект живёт на Windows, а sh/py/js
+# уезжают в Linux-CI и в конфиги CLI — концы строк не должны дрейфовать.
+* text=auto
+
+# Скрипты хуков и git-хуков — всегда LF (исполняются и под Linux).
+*.py text eol=lf
+*.sh text eol=lf
+hooks/commit-msg text eol=lf
+hooks/pre-commit text eol=lf
+
+# Релизные артефакты — бинарные, никакой конвертации.
+*.vsix binary
