@@ -1,18 +1,18 @@
 # Анализ тестового покрытия AI Office Dashboard
 
-Дата первого анализа: 2026-08-02. Актуализировано: 2026-08-02 — тестовый
-ландшафт расширен до 15 файлов (добавлены `eventWatcher.test.ts`,
-`hookInstaller.test.ts`, `emitAgentEventPy.test.ts`), обновлены `npm test` и
-`npm run lint`. Версия пакета: 0.15.0.
+Дата первого анализа: 2026-08-02. Актуализировано: 2026-08-04 — тестовый
+ландшафт: 16 файлов (добавлены `hookWiring.test.ts`, `usagePace.test.ts`;
+удалён `configMigration.test.ts` вместе с миграцией `claudeOffice.*` →
+`aiOffice.*`). Версия пакета: 0.16.0.
 
 ## 1. Общая картина
 
-- Тестов: **15 файлов** в `test/` (≈2750 строк), все — самодельные
+- Тестов: **16 файлов** в `test/`, все — самодельные
   assert-скрипты на `node:assert`, без фреймворка (ни Mocha, ни Jest, ни
   `@vscode/test-electron`).
 - Каждый файл компилируется вместе с проектом в `out/test/*.js` и запускается
   как обычный Node-скрипт; в конце печатает «All … tests passed.».
-- Покрыто напрямую: **13 из 17** модулей `src/` (`hookInstaller` — частично:
+- Покрыто напрямую: **13 из 16** модулей `src/` (`hookInstaller` — частично:
   только vscode-независимые функции) + интеграционные тесты **обоих**
   хук-скриптов: `hooks/emit-agent-event.js` и `hooks/emit-agent-event.py`.
 - Не покрыто: **4 модуля** (`usageWatcher`, `locale`, `extension`,
@@ -23,11 +23,11 @@
 Из `package.json` (`scripts`):
 
 - `npm test` — единственный вход: `tsc -p ./` + последовательный запуск всех
-  15 скомпилированных файлов `node out/test/<name>.test.js`. Порядок в скрипте:
+  16 скомпилированных файлов `node out/test/<name>.test.js`. Порядок в скрипте:
   eventParser → types → agentState → agentDetail → hookConfig → hookConfigKimi →
   subscriptionUsage → kimiUsage → agentRoster → emitAgentEvent →
-  emitAgentEventPy → stopFlag → configMigration → eventWatcher → hookInstaller.
-  Падение любого файла обрывает цепочку (`&&`).
+  emitAgentEventPy → stopFlag → eventWatcher → hookInstaller → hookWiring →
+  usagePace. Падение любого файла обрывает цепочку (`&&`).
 - `npm run compile` — только сборка (`tsc -p ./`), часть `npm test`.
 - `npm run lint` — `eslint src test hooks --ext ts,js`: линтятся и исходники,
   и тесты, и хук-скрипты. В `.eslintrc.json` для них заведены scoped overrides:
@@ -52,7 +52,7 @@
 - `agentRoster.test.ts` использует реальную ФС (`fs.mkdtempSync` в `os.tmpdir()`).
 - Остальные — чистые юнит-тесты в памяти, без `vscode`-рантайма
   (граница с VSCode API обходится либо чистыми функциями, либо in-memory
-  doubles, как в `configMigration.test.ts`).
+  doubles, как в `stopFlag.test.ts`).
 
 ## 3. Покрытие по тестовым файлам
 
@@ -206,15 +206,7 @@
   незатронутые окна, Windows-кейс (регистр + trailing slash, под `win32`).
 - `stopFlagPaths`: по одному флагу на CLI (`.claude` / `.kimi-code`).
 
-### 3.12 `test/configMigration.test.ts` (135 строк) → `src/configMigration.ts`
-
-- Чистая `migrateConfigKeys` с in-memory reader/writer doubles (без vscode):
-  миграция `claudeOffice.*` → `aiOffice.*`; global и workspace уровни
-  независимо; уже установленный новый ключ не затирается; несуществующие
-  legacy-ключи пропускаются; falsy-значения (`false`, `''`, `{}`) мигрируют
-  (undefined = «не установлено»); полный охват всех 14 переименованных ключей.
-
-### 3.13 `test/eventWatcher.test.ts` (214 строки) → `src/eventWatcher.ts`
+### 3.12 `test/eventWatcher.test.ts` (214 строки) → `src/eventWatcher.ts`
 
 Асинхронный интеграционный тест на реальных temp-файлах; продовый poll в 1 с
 заменён инжектируемой опцией `pollMs: 50`, ожидания — через `waitFor` с
@@ -236,7 +228,7 @@
   валидный JSON (частичная первая строка отбрасывается), replay совпадает с
   оставшимся содержимым; лог под капом не трогается.
 
-### 3.14 `test/hookInstaller.test.ts` (133 строки) → `src/hookInstaller.ts` (частично)
+### 3.13 `test/hookInstaller.test.ts` (133 строки) → `src/hookInstaller.ts` (частично)
 
 Покрыты vscode-независимые функции; `installHooks`, `ensureHooksOnActivation`,
 `configuredTargets`, `detectRuntime` не покрыты (нужен extension host / PATH).
@@ -253,7 +245,7 @@
   `coveredTargets`; частичная регистрация (старой версии расширения) →
   `settingsOk` false, но цель всё равно считается covered.
 
-### 3.15 `test/emitAgentEventPy.test.ts` (420 строк) → `hooks/emit-agent-event.py`
+### 3.14 `test/emitAgentEventPy.test.ts` (420 строк) → `hooks/emit-agent-event.py`
 
 Интеграционный порт `emitAgentEvent.test.ts` на Python-реализацию хука:
 обе реализации обязаны вести себя одинаково. Интерпретатор ищется в порядке
@@ -272,6 +264,29 @@
   `.000Z`; флаг перезаписывается pretty-printed (assert по распарсенному
   содержимому, не по форматированию).
 
+### 3.15 `test/hookWiring.test.ts` (46 строк) → `hooks/` + `src/hookConfig*.ts` + `src/types.ts`
+
+Wiring-тест (ADR-0001, II.7): аргументы `event_type`, которые обрабатывают
+оба хук-скрипта (py/js, читаются как текст), обязаны совпадать с регистрациями
+хуков обоих CLI (`HOOK_EVENTS` / `KIMI_HOOK_EVENTS`), и каждый зарегистрированный
+аргумент должен быть известным типом события в `src/types.ts`. Регистрация,
+указывающая на неизвестный скриптам аргумент (или наоборот), иначе молча
+терялась бы в рантайме.
+
+### 3.16 `test/usagePace.test.ts` (146 строк) → `src/usagePace.ts`
+
+Чистая pace-модель квот (burn rate = used% / elapsed% окна):
+
+- `percentTimeElapsed`: доля окна по `windowMinutes`/`resetsAt`, зажата 0–100
+  (окно ещё не началось, reset в прошлом).
+- `burnRate` / `paceStatus`: темп «горячо / по графику / с запасом» по
+  порогам; предохранители малых выборок (<20% окна или 100% использования
+  не раздувают сигнал).
+- `nextAlertLevel`: эскалация раннего предупреждения (burnRate > 1.5 и
+  остаток < 50%), монотонность уровней, сброс на новом окне.
+- `withPace`: обогащение снапшотов Claude и Kimi (через реальные парсеры
+  `parseUsageResponse` / `parseKimiUsageResponse`), окна 5h/7d.
+
 ## 4. Модули src/ без прямых тестов
 
 | Модуль | Строк | Назначение | Почему не покрыт / насколько тестируем |
@@ -283,7 +298,7 @@
 
 Оговорки к покрытию:
 
-- `src/hookInstaller.ts` покрыт **частично** (§3.14): `resolveTargets` и
+- `src/hookInstaller.ts` покрыт **частично** (§3.13): `resolveTargets` и
   `checkHookStatus` — да; `installHooks`, `ensureHooksOnActivation`,
   `detectRuntime`, `configuredTargets` — нет (vscode API, PATH, запись файлов).
 - Косвенно не покрыт и watcher-класс в уже тестируемом модуле:
@@ -293,8 +308,8 @@
 ## 5. Пробелы, которые стоит закрыть
 
 Закрыто с момента первой версии документа: Python-двойник хук-скрипта покрыт
-интеграционно (§3.15), `eventWatcher` покрыт (§3.13), vscode-независимая часть
-`hookInstaller` покрыта (§3.14), дефект `stopFlag.test.ts` устранён
+интеграционно (§3.14), `eventWatcher` покрыт (§3.12), vscode-независимая часть
+`hookInstaller` покрыта (§3.13), дефект `stopFlag.test.ts` устранён
 (`console.log` перенесён в конец файла), eslint теперь покрывает `test/` и
 `hooks/` со scoped overrides.
 
@@ -308,7 +323,7 @@
    статус-бар, команды). Если появится потребность — `@vscode/test-electron`;
    до тех пор разумно держать границу «чистая логика / vscode-клей» и
    выносить логику из `extension.ts` в тестируемые модули (как уже сделано с
-   `configMigration`, `stopFlag`, `hookConfig*`, `hookInstaller`).
+   `stopFlag`, `hookConfig*`, `hookInstaller`, `usagePace`).
 3. **Локаль `locale.ts`:** `uiLocale`/`isRussianUi` можно покрыть через
    инъекцию конфигурации (сейчас читают `vscode.workspace` напрямую) — ветки
    `system` / `vscode` / явный код языка.
@@ -321,9 +336,9 @@
 ## 6. Итог
 
 Тестовый набор компактный, но качественный: вся чистая доменная логика
-(парсинг событий, состояние агентов, комнаты, хук-конфиги, квоты, флаг
-остановки, миграция настроек, файловый watcher, установка хуков) покрыта
-плотно, включая регрессионные сценарии из реальной эксплуатации и обе
+(парсинг событий, состояние агентов, комнаты, хук-конфиги, квоты и их
+pace-модель, флаг остановки, файловый watcher, установка и проводка хуков)
+покрыта плотно, включая регрессионные сценарии из реальной эксплуатации и обе
 платформы CLI (Claude Code и Kimi Code). Обе реализации хук-скрипта — JS и
 Python — проверяются интеграционно на паритет. Непокрытым остаётся только
 слой, непосредственно завязанный на VSCode API (`extension`, webview-провайдер,

@@ -190,76 +190,6 @@
             "type": "string"
           },
           "markdownDescription": "%cfg.agentRooms%"
-        },
-        "claudeOffice.language": {
-          "type": "string",
-          "deprecationMessage": "%cfg.deprecated.rename%",
-          "description": "%cfg.deprecated.rename%"
-        },
-        "claudeOffice.eventsFile": {
-          "type": "string",
-          "deprecationMessage": "%cfg.deprecated.rename%",
-          "description": "%cfg.deprecated.rename%"
-        },
-        "claudeOffice.hooks.autoSetup": {
-          "type": "boolean",
-          "deprecationMessage": "%cfg.deprecated.rename%",
-          "description": "%cfg.deprecated.rename%"
-        },
-        "claudeOffice.hooks.targets": {
-          "type": "string",
-          "deprecationMessage": "%cfg.deprecated.rename%",
-          "description": "%cfg.deprecated.rename%"
-        },
-        "claudeOffice.statusBar.enabled": {
-          "type": "boolean",
-          "deprecationMessage": "%cfg.deprecated.rename%",
-          "description": "%cfg.deprecated.rename%"
-        },
-        "claudeOffice.roster.enabled": {
-          "type": "boolean",
-          "deprecationMessage": "%cfg.deprecated.rename%",
-          "description": "%cfg.deprecated.rename%"
-        },
-        "claudeOffice.usage.enabled": {
-          "type": "boolean",
-          "deprecationMessage": "%cfg.deprecated.rename%",
-          "description": "%cfg.deprecated.rename%"
-        },
-        "claudeOffice.usage.pollSeconds": {
-          "type": "number",
-          "deprecationMessage": "%cfg.deprecated.rename%",
-          "description": "%cfg.deprecated.rename%"
-        },
-        "claudeOffice.usage.costSource": {
-          "type": "string",
-          "deprecationMessage": "%cfg.deprecated.rename%",
-          "description": "%cfg.deprecated.rename%"
-        },
-        "claudeOffice.usage.limitBlockUsd": {
-          "type": "number",
-          "deprecationMessage": "%cfg.deprecated.rename%",
-          "description": "%cfg.deprecated.rename%"
-        },
-        "claudeOffice.usage.limitWeeklyUsd": {
-          "type": "number",
-          "deprecationMessage": "%cfg.deprecated.rename%",
-          "description": "%cfg.deprecated.rename%"
-        },
-        "claudeOffice.usage.limitWeeklyOpusUsd": {
-          "type": "number",
-          "deprecationMessage": "%cfg.deprecated.rename%",
-          "description": "%cfg.deprecated.rename%"
-        },
-        "claudeOffice.scope": {
-          "type": "string",
-          "deprecationMessage": "%cfg.deprecated.rename%",
-          "description": "%cfg.deprecated.rename%"
-        },
-        "claudeOffice.agentRooms": {
-          "type": "object",
-          "deprecationMessage": "%cfg.deprecated.rename%",
-          "description": "%cfg.deprecated.rename%"
         }
       }
     }
@@ -270,7 +200,7 @@
     "bundle": "esbuild src/extension.ts --bundle --outfile=out/src/extension.js --external:vscode --format=cjs --platform=node --target=node18 --minify",
     "watch": "tsc -watch -p ./",
     "lint": "eslint src test hooks --ext ts,js",
-    "test": "tsc -p ./ && node out/test/eventParser.test.js && node out/test/types.test.js && node out/test/agentState.test.js && node out/test/agentDetail.test.js && node out/test/hookConfig.test.js && node out/test/hookConfigKimi.test.js && node out/test/subscriptionUsage.test.js && node out/test/kimiUsage.test.js && node out/test/agentRoster.test.js && node out/test/emitAgentEvent.test.js && node out/test/emitAgentEventPy.test.js && node out/test/stopFlag.test.js && node out/test/configMigration.test.js && node out/test/eventWatcher.test.js && node out/test/hookInstaller.test.js && node out/test/hookWiring.test.js && node out/test/usagePace.test.js"
+    "test": "tsc -p ./ && node out/test/eventParser.test.js && node out/test/types.test.js && node out/test/agentState.test.js && node out/test/agentDetail.test.js && node out/test/hookConfig.test.js && node out/test/hookConfigKimi.test.js && node out/test/subscriptionUsage.test.js && node out/test/kimiUsage.test.js && node out/test/agentRoster.test.js && node out/test/emitAgentEvent.test.js && node out/test/emitAgentEventPy.test.js && node out/test/stopFlag.test.js && node out/test/eventWatcher.test.js && node out/test/hookInstaller.test.js && node out/test/hookWiring.test.js && node out/test/usagePace.test.js"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

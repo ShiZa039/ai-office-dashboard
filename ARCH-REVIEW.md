@@ -1,6 +1,6 @@
 # Архитектурный обзор AI Office Dashboard
 
-Дата обзора: 2026-08-02. Актуализировано 2026-08-02 после волны исправлений (ротация журнала событий, детект пересоздания файла, удаление мёртвого типа `agent_update`, интеграционный тест Python-хука). Проект: VSCode-расширение «AI Office Dashboard» (TypeScript, `src/`, ~3300 строк кода, 17 модулей). Расширение визуализирует работу агентов CLI-инструментов (Claude Code и Kimi Code) в виде «офиса» с комнатами в webview-панели.
+Дата обзора: 2026-08-02. Актуализировано 2026-08-04: pace-модель квот (`usagePace`); удалена `configMigration` — deprecated-ключи `claudeOffice.*` сняты после v0.16.0. Проект: VSCode-расширение «AI Office Dashboard» (TypeScript, `src/`, ~3300 строк кода, 16 модулей). Расширение визуализирует работу агентов CLI-инструментов (Claude Code и Kimi Code) в виде «офиса» с комнатами в webview-панели.
 
 ## 1. Общая картина
 
@@ -8,7 +8,7 @@
 
 Ключевые архитектурные свойства:
 
-- **Разделение чистой логики и клея.** Модули `types.ts`, `eventParser.ts`, `agentRoster.ts`, `agentDetail.ts`, `hookConfig.ts`, `hookConfigKimi.ts`, `stopFlag.ts` (чистая часть), `subscriptionUsage.ts`, `kimiUsage.ts` не импортируют `vscode` и покрыты юнит-тестами в `test/`. Клей (файловая система, UI, конфигурация VSCode) собран в `extension.ts`, `hookInstaller.ts`, `webview/provider.ts`, `locale.ts`, `usageWatcher.ts`.
+- **Разделение чистой логики и клея.** Модули `types.ts`, `eventParser.ts`, `agentRoster.ts`, `agentDetail.ts`, `hookConfig.ts`, `hookConfigKimi.ts`, `stopFlag.ts` (чистая часть), `subscriptionUsage.ts`, `kimiUsage.ts`, `usagePace.ts` не импортируют `vscode` и покрыты юнит-тестами в `test/`. Клей (файловая система, UI, конфигурация VSCode) собран в `extension.ts`, `hookInstaller.ts`, `webview/provider.ts`, `locale.ts`, `usageWatcher.ts`.
 - **Однонаправленный поток данных.** Файл событий — единственный вход; webview никогда не мутирует состояние, а только запрашивает действия через сообщения.
 - **Декларативная изоляция окон.** Каждое окно VSCode фильтрует события по `cwd` рабочих папок (`aiOffice.scope`), так что несколько окон видят каждое свой проект, несмотря на общий файл событий.
 
@@ -28,9 +28,9 @@
 | `src/stopFlag.ts` | emergency stop | Флаг экстренной остановки, общий с хук-скриптами |
 | `src/subscriptionUsage.ts` | usage | Лимиты подписки Claude (OAuth endpoint) + универсальный watcher |
 | `src/kimiUsage.ts` | usage | Лимиты плана Kimi Code (`/coding/v1/usages`) |
+| `src/usagePace.ts` | usage | Pace-модель квот: burn rate vs окно, темп, ранние алерты |
 | `src/usageWatcher.ts` | usage | Стоимость через внешний `npx ccusage` (опционально) |
 | `src/locale.ts` | инфра | Определение языка UI (система/VSCode/настройка) |
-| `src/configMigration.ts` | инфра | Разовая миграция ключей `claudeOffice.*` → `aiOffice.*` |
 | `src/webview/provider.ts` | представление | `OfficeDashboardProvider`: HTML, кэш состояния, двунаправленные сообщения |
 | `src/extension.ts` | композиция | Точка входа: связывает всё, команды, статус-бар, реакция на конфиг |
 
@@ -187,7 +187,7 @@
 - Креды: `~/.claude/.credentials.json`, на macOS — fallback в keychain (`security find-generic-password`). Токены расширение **не обновляет** — это делает любая сессия Claude Code.
 - `parseUsageResponse` — защитный разбор: предпочитает массив `limits[]` (kind/percent/resets_at, недельные лимиты по моделям), fallback на старую плоскую форму `five_hour/seven_day/seven_day_opus`.
 - `UsageProviderConfig` — точка расширения: id, URL, заголовки, чтение кредов, парсер и политика сообщений об ошибках. Благодаря этому `SubscriptionUsageWatcher` полностью провайдер-агностичен.
-- Watcher: немедленный тик + интервал; защёлка `inFlight` против наложения опросов; 401/403 → сообщение «перелогиньтесь»; 429 → тихо ждём следующего тика; истёкший токен — не ошибка UI, только лог.
+- Watcher: немедленный тик + интервал; защёлка `inFlight` против наложения опросов; 401/403 → сообщение «перелогиньтесь»; 429 → backoff с honouring `Retry-After` (баговый `Retry-After: 0` игнорируется), экспонента 60 с → 30 мин; истёкший токен — не ошибка UI, только лог.
 
 ### 4.12. `src/kimiUsage.ts` — лимиты плана Kimi Code
 
@@ -197,23 +197,26 @@
 - Ответ: `limits[]` — скользящие rate-окна (5 ч), верхнеуровневый `usage` — недельная квота; тариф из `user.membership.level` (`LEVEL_INTERMEDIATE` → `intermediate`). Квоты могут приходить строками — нормализуются через `Number()`.
 - Политика ошибок отражает специфику: токен живёт ~15 минут и обновляется самим CLI, поэтому отсутствие кредов и истечение токена — `null` (молчим, держим последние данные), жалуемся только на 401/403.
 
-### 4.13. `src/usageWatcher.ts` — стоимость через ccusage
+### 4.13. `src/usagePace.ts` — pace-модель квот
+
+Экспорты: типы `UsagePace`, `PaceStatus`; функции `percentTimeElapsed`, `burnRate`, `usagePace`, `paceStatus`, `nextAlertLevel`, `withPace`.
+
+- Burn rate = used% / elapsed% окна (1.0 — точно по графику); темп `hot` / `on_pace` (±5 п.п.) / `room`. Идея и пороги адаптированы из ClaudeBar (`docs/USAGE-PROVIDERS.md` §3).
+- Статус `paceStatus`: сначала абсолютные предохранители (`depleted` при 100%, `critical` при остатке <20%), затем раннее pace-предупреждение (`burnRate > 1.5` при остатке <50%) — pace никогда не понижает абсолютный статус.
+- `nextAlertLevel` — монотонная эскалация (алерт один раз на уровень); `withPace` in-place обогащает лимиты снапшота полями `expectedPct`/`pace`/`paceStatus`.
+- Чистый модуль без `vscode`; клей — `subscriptionUsage.ts` (обогащение) и `extension.ts` (алерты деградации, `aiOffice.usage.degradationAlerts`), отрисовка тика/лейбла — `media/office.js`.
+
+### 4.14. `src/usageWatcher.ts` — стоимость через ccusage
 
 Экспорты: типы `UsageBlock`, `UsageWeekly`, `UsageLimits`, `UsageSnapshot`; класс `UsageWatcher`.
 
 Опциональный источник (`aiOffice.usage.costSource = 'ccusage'`): запускает `npx --yes ccusage@latest blocks --active --json` и `weekly --json --order desc` с таймаутом 30 с. Парсит активный 5-часовой блок (стоимость, токены, burn-rate, остаток) и текущую неделю (в т.ч. отдельно затраты на Opus через `modelBreakdowns`), скрещивает с пользовательскими лимитами из настроек (`usage.limitBlockUsd` и т.п.). Особенности: на Windows спавн через shell (`npx.cmd`, обход CVE-2024-27980), JSON извлекается срезом от первого `{` (терпимость к мусору в stdout), интервал общий с подписками (`usage.pollSeconds`, минимум 30 с).
 
-### 4.14. `src/locale.ts` — язык интерфейса
+### 4.15. `src/locale.ts` — язык интерфейса
 
 Экспорты: `uiLocale()`, `isRussianUi()`.
 
 Настройка `aiOffice.language`: `'vscode'` → `vscode.env.language`; явный код → как есть; `'system'` (по умолчанию) → реальная локаль ОС: env `LC_ALL/LC_MESSAGES/LANG`, на Windows — реестр `HKCU\Control Panel\International\LocaleName`, fallback — `Intl`. Кэшируется на сессию. Мотивация задокументирована: язык VSCode часто оставляют английским по привычке, а дашборд должен говорить на языке системы.
-
-### 4.15. `src/configMigration.ts` — миграция настроек
-
-Экспорты: `ConfigInspection`, `ConfigReader`, `ConfigWriter`, `migrateConfigKeys`, `migrateLegacyConfiguration`.
-
-Разовая (при активации) миграция ключей `claudeOffice.*` → `aiOffice.*` (14 ключей: language, eventsFile, hooks.*, statusBar/roster/usage.*, scope, agentRooms) по уровням global/workspace; не затирает уже заданные новые значения. Чистая часть тестируется через минимальные интерфейсы reader/writer; `require('vscode')` — ленивый, чтобы модуль грузился в plain-node тестах. Также переносится флаг `hooksPromptDismissed` из `globalState`.
 
 ### 4.16. `src/webview/provider.ts` — провайдер дашборда
 
@@ -237,7 +240,7 @@
 
 ## 5. Конфигурация и внешние интерфейсы
 
-Настройки (`aiOffice.*`): `language`, `eventsFile`, `scope` (workspace/global), `agentRooms`, `hooks.autoSetup`, `hooks.targets`, `statusBar.enabled`, `roster.enabled`, `usage.enabled`, `usage.pollSeconds`, `usage.costSource`, `usage.limitBlockUsd/WeeklyUsd/WeeklyOpusUsd`.
+Настройки (`aiOffice.*`): `language`, `eventsFile`, `scope` (workspace/global), `agentRooms`, `hooks.autoSetup`, `hooks.targets`, `statusBar.enabled`, `roster.enabled`, `usage.enabled`, `usage.pollSeconds`, `usage.costSource`, `usage.limitBlockUsd/WeeklyUsd/WeeklyOpusUsd`, `usage.degradationAlerts`.
 
 Файловые контракты:
 

@@ -42,7 +42,7 @@ Manual hook installation and troubleshooting — [INSTALL.md](INSTALL.md).
 If you used the extension under its old name (≤ v0.13.x):
 
 - The extension is now released as **AI Office** (`ai-office-dashboard`). The old `claude-office-dashboard` build does not update automatically — install the new `.vsix` (the old extension can be uninstalled afterwards).
-- All settings and commands were renamed `claudeOffice.*` → `aiOffice.*`. Setting values migrate automatically on first launch of the new version; the old keys remain as deprecated aliases for now.
+- All settings and commands were renamed `claudeOffice.*` → `aiOffice.*`. Values migrated automatically through v0.16.0; the deprecated aliases are removed in later builds — if you are upgrading from the `claude-office-dashboard` era, run v0.16.0 once first.
 - Custom keybindings bound to `claudeOffice.*` commands are not migrated — update them manually in `keybindings.json`.
 
 ## How it works

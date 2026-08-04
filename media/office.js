@@ -17,21 +17,8 @@ var mainWorkingSince = null;
 var HIDE_IDLE_KEY = "aiOffice.hideIdleAgents";
 var hideIdle = true;
 
-// Storage keys moved from "claudeOffice.*" to "aiOffice.*" with the rebrand —
-// adopt the old value once (copy it under the new key), then drop the old key.
-function readStorageKey(newKey, oldKey) {
-  var v = localStorage.getItem(newKey);
-  if (v === null) {
-    v = localStorage.getItem(oldKey);
-    if (v !== null) {
-      try { localStorage.setItem(newKey, v); localStorage.removeItem(oldKey); } catch(e) {}
-    }
-  }
-  return v;
-}
-
 try {
-  var savedHideIdle = readStorageKey(HIDE_IDLE_KEY, "claudeOffice.hideIdleAgents");
+  var savedHideIdle = localStorage.getItem(HIDE_IDLE_KEY);
   if (savedHideIdle !== null) hideIdle = savedHideIdle === "1";
 } catch(e) { /* localStorage unavailable */ }
 
@@ -975,7 +962,7 @@ function initTimelineSelector() {
   var sel = document.getElementById("timeline-window");
   if (!sel) return;
   try {
-    var saved = readStorageKey(TIMELINE_WINDOW_KEY, "claudeOffice.timelineWindowMs");
+    var saved = localStorage.getItem(TIMELINE_WINDOW_KEY);
     if (saved) {
       var n = parseInt(saved, 10);
       if (!isNaN(n) && n > 0) currentTimelineMs = n;
@@ -1092,7 +1079,7 @@ var USAGE_FORECAST_MIN_SPAN_MS = 10 * 60000;
 var USAGE_HISTORY_MAX_SAMPLES = 500;
 var usageHistory = {}; // kind -> [{t, pct}]
 try {
-  var savedHist = readStorageKey(USAGE_HISTORY_KEY, "claudeOffice.usageHistory");
+  var savedHist = localStorage.getItem(USAGE_HISTORY_KEY);
   if (savedHist) usageHistory = JSON.parse(savedHist) || {};
 } catch(e) { usageHistory = {}; }
 

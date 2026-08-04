@@ -26,6 +26,5 @@
   "cfg.usage.limitWeeklyOpusUsd": "Opus weekly limit USD (only for the ccusage cost bars)",
   "cfg.usage.degradationAlerts": "Warn when a plan quota degrades (running hot / critically low / depleted)",
   "cfg.scope": "workspace = this window only; global = all agent CLI sessions",
-  "cfg.agentRooms": "Custom agent→room mapping. Merged **over** the built-in defaults. Example: `{\"my-custom-agent\": \"backend\", \"design-agent\": \"frontend\"}`.\n\nKnown rooms: `directors`, `backend`, `frontend`, `qa`, `security`, `devops`, `integrations`, `ai-lab`, `iot`, `lobby`.\n\nUnknown agents are resolved by a keyword heuristic (e.g. `*-director` → directors, `react-*` → frontend); unmatched agents fall back to `lobby`.",
-  "cfg.deprecated.rename": "Renamed to the matching `aiOffice.*` setting. Values are migrated automatically; this key will be removed in a future release."
+  "cfg.agentRooms": "Custom agent→room mapping. Merged **over** the built-in defaults. Example: `{\"my-custom-agent\": \"backend\", \"design-agent\": \"frontend\"}`.\n\nKnown rooms: `directors`, `backend`, `frontend`, `qa`, `security`, `devops`, `integrations`, `ai-lab`, `iot`, `lobby`.\n\nUnknown agents are resolved by a keyword heuristic (e.g. `*-director` → directors, `react-*` → frontend); unmatched agents fall back to `lobby`."
 }

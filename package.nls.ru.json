@@ -26,6 +26,5 @@
   "cfg.usage.limitWeeklyOpusUsd": "Лимит $ на неделю Opus (только для ccusage-баров)",
   "cfg.usage.degradationAlerts": "Предупреждать о деградации квот плана (расход опережает график / критически мало / исчерпана)",
   "cfg.scope": "workspace = только это окно; global = все сессии агентских CLI",
-  "cfg.agentRooms": "Кастомный маппинг агент→комната. Мерджится **поверх** встроенных значений. Пример: `{\"my-custom-agent\": \"backend\", \"design-agent\": \"frontend\"}`.\n\nИзвестные комнаты: `directors`, `backend`, `frontend`, `qa`, `security`, `devops`, `integrations`, `ai-lab`, `iot`, `lobby`.\n\nНеизвестные агенты распознаются keyword-эвристикой (например, `*-director` → directors, `react-*` → frontend); нераспознанные попадают в `lobby`.",
-  "cfg.deprecated.rename": "Переименовано в соответствующую настройку `aiOffice.*`. Значения мигрируют автоматически; ключ будет удалён в будущем релизе."
+  "cfg.agentRooms": "Кастомный маппинг агент→комната. Мерджится **поверх** встроенных значений. Пример: `{\"my-custom-agent\": \"backend\", \"design-agent\": \"frontend\"}`.\n\nИзвестные комнаты: `directors`, `backend`, `frontend`, `qa`, `security`, `devops`, `integrations`, `ai-lab`, `iot`, `lobby`.\n\nНеизвестные агенты распознаются keyword-эвристикой (например, `*-director` → directors, `react-*` → frontend); нераспознанные попадают в `lobby`."
 }

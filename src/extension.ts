@@ -19,7 +19,6 @@ import { ensureHooksOnActivation, installHooks } from './hookInstaller';
 import { MAIN_AGENT_NAME, getRoomForAgent } from './types';
 import { buildAgentRuns } from './agentDetail';
 import { isRussianUi } from './locale';
-import { migrateLegacyConfiguration } from './configMigration';
 import {
   activateStopEverywhere,
   readStopFlag,
@@ -104,8 +103,6 @@ let kimiUsageWatcher: SubscriptionUsageWatcher | null = null;
 const log = vscode.window.createOutputChannel('AI Office');
 
 export function activate(context: vscode.ExtensionContext) {
-  // Carry settings over from the legacy claudeOffice.* keys (no-op on fresh installs).
-  void migrateLegacyConfiguration(context);
   store = new AgentStateStore();
   store.setRoomResolver(buildRoomResolver());
   store.setCwdFilter(currentCwdFilter());
