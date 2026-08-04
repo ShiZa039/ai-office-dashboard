@@ -1,6 +1,6 @@
 # Roadmap — AI Office
 
-История релизов и план развития. Текущая версия — `v0.15.0`.
+История релизов и план развития. Текущая версия — `v0.16.0`.
 
 > This file is maintained in Russian only (internal dev history). User-facing docs are bilingual: [README.md](README.md) / [README.ru.md](README.ru.md), [INSTALL.md](INSTALL.md) / [INSTALL.ru.md](INSTALL.ru.md).
 
@@ -250,7 +250,7 @@
   неинтерактивном режиме (`kimi --print`) — стоп и события на такие запуски не
   действуют
 
-### Unreleased — pace-модель квот + перенос опыта ClaudeBar (коммит `61dffa7`)
+### v0.16.0 — pace-модель квот + перенос опыта ClaudeBar (коммит `61dffa7`)
 
 - Pace-модель квот (`src/usagePace.ts`, идея и пороги — ClaudeBar,
   github.com/tddworks/ClaudeBar): burn rate = used% / elapsed% окна; темп

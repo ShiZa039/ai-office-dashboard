@@ -4,7 +4,7 @@
 
 > A VSCode extension that visualizes Claude Code and Kimi Code CLI activity as an office floor map. Every subagent shows up as a figure in its own "room" (Backend, Frontend, QA, Security, DevOps, AI-lab, etc.), pulses while working, and gets a checkmark when done. On top: a main-model indicator, subscription usage limits, and an emergency stop button.
 
-**Current version:** `v0.15.0` · zero-config: dual CLI support (Claude Code + Kimi Code), automatic hook installation, agent auto-discovery, dynamic rooms, real Pro/Max plan limits, agent emergency stop, en/ru UI.
+**Current version:** `v0.16.0` · zero-config: dual CLI support (Claude Code + Kimi Code), automatic hook installation, agent auto-discovery, dynamic rooms, real Pro/Max plan limits, agent emergency stop, en/ru UI.
 
 ---
 
@@ -27,7 +27,7 @@ When you orchestrate several subagents in parallel, you lose track of who is doi
 1. Install the `.vsix`:
 
    ```
-   code --install-extension ai-office-dashboard-0.15.0.vsix --force
+   code --install-extension ai-office-dashboard-0.16.0.vsix --force
    ```
 
 2. Reload Window → a house icon appears in the Activity Bar.

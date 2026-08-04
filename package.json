@@ -2,7 +2,7 @@
   "name": "ai-office-dashboard",
   "displayName": "AI Office",
   "description": "%ext.description%",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "publisher": "shiza039",
   "license": "MIT",
   "repository": {

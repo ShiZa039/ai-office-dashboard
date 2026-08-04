@@ -4,8 +4,9 @@
 
 ## Текущее состояние
 
-- Расширение: **AI Office** (`ai-office-dashboard`), **v0.15.0** — собрано
-  (`ai-office-dashboard-0.15.0.vsix`) и установлено в VSCode.
+- Расширение: **AI Office** (`ai-office-dashboard`), **v0.16.0** — собран
+  (`ai-office-dashboard-0.16.0.vsix`). Установка:
+  `code --install-extension ai-office-dashboard-0.16.0.vsix --force`.
 - `master` опережает `origin/master` на **2 коммита** (`61dffa7` pace-волна,
   `2a19bed` roadmap-SHA). **Следующий шаг: пуш** (по команде пользователя).
 - Тегов `v0.14.0` / `v0.15.0` нет (последний — `v0.13.2`) — ритуал релиза
