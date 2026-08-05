@@ -114,6 +114,7 @@ Kimi Code hooks  ──┘          ↑                              ↑
 - `AI Office: Emergency Stop / Resume Agents` — 🛑 остановить/возобновить агентов
 - `AI Office: Install Agent Hooks` — установить/починить хуки вручную (во все CLI, выбранные в `aiOffice.hooks.targets`)
 - `AI Office: Clear Events` — сброс кэша событий
+- `AI Office: Открыть настройки` — Settings-редактор VS Code с фильтром по расширению (также кнопка ⚙ в шапке дашборда)
 
 Установленная версия расширения показывается в правом нижнем углу дашборда.
 

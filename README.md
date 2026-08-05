@@ -114,6 +114,7 @@ For most projects the heuristics are enough — no configuration needed.
 - `AI Office: Emergency Stop / Resume Agents` — 🛑 stop/resume agents
 - `AI Office: Install Agent Hooks` — install/repair hooks manually (into every CLI selected by `aiOffice.hooks.targets`)
 - `AI Office: Clear Events` — reset the event cache
+- `AI Office: Open Settings` — VS Code Settings editor filtered to this extension (also the ⚙ button in the dashboard header)
 
 The installed extension version is shown in the bottom-right corner of the dashboard.
 
