@@ -39,6 +39,9 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
   /** Callback invoked when the user hits the emergency-stop / resume button. */
   onToggleStop?: () => void;
 
+  /** Callback invoked when the user hits the settings (gear) button. */
+  onOpenSettings?: () => void;
+
   /** Callbacks for the agent drill-down drawer. */
   onAgentDetailRequest?: (name: string) => void;
   onAgentDetailClose?: () => void;
@@ -172,6 +175,10 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
     webview.onDidReceiveMessage((msg) => {
       if (msg.type === 'toggle_stop') {
         this.onToggleStop?.();
+        return;
+      }
+      if (msg.type === 'open_settings') {
+        this.onOpenSettings?.();
         return;
       }
       if (msg.type === 'agent_detail_request') {

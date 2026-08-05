@@ -93,6 +93,23 @@ body {
   color: var(--text-primary);
 }
 
+/* Gear button: opens the VS Code settings editor filtered to this extension. */
+.settings-btn {
+  font-size: 12px;
+  line-height: 1;
+  padding: 1px 4px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.settings-btn:hover {
+  color: var(--text-primary);
+}
+
 /* ── Emergency stop ──
    A full-width safety control under the header: obvious at first glance,
    replaced by the red "stop is active" banner while the flag is set. */

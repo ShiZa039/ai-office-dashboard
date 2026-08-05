@@ -324,6 +324,9 @@ export function activate(context: vscode.ExtensionContext) {
 
   provider.onReady = broadcastState;
   provider.onToggleStop = toggleStop;
+  provider.onOpenSettings = () => {
+    void vscode.commands.executeCommand('aiOffice.openSettings');
+  };
   provider.onAgentDetailRequest = (name) => {
     detailAgent = name;
     pushAgentDetail();
@@ -373,6 +376,13 @@ export function activate(context: vscode.ExtensionContext) {
           : 'AI Office: hooks were already installed — scripts refreshed.',
       );
     }
+  });
+
+  const openSettingsCmd = vscode.commands.registerCommand('aiOffice.openSettings', () => {
+    void vscode.commands.executeCommand(
+      'workbench.action.openSettings',
+      '@ext:shiza039.ai-office-dashboard',
+    );
   });
 
   const clearCmd = vscode.commands.registerCommand('aiOffice.clearEvents', () => {
@@ -523,6 +533,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     viewRegistration, showCmd, openInEditorCmd, emergencyStopCmd, installHooksCmd, clearCmd,
+    openSettingsCmd,
     cfgChange, foldersChange, statusBarItem,
   );
 }

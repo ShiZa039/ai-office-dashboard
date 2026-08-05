@@ -2,7 +2,7 @@
   "name": "ai-office-dashboard",
   "displayName": "AI Office",
   "description": "%ext.description%",
-  "version": "0.16.0",
+  "version": "0.16.1",
   "publisher": "shiza039",
   "license": "MIT",
   "repository": {
@@ -61,6 +61,11 @@
       {
         "command": "aiOffice.installHooks",
         "title": "%cmd.installHooks%"
+      },
+      {
+        "command": "aiOffice.openSettings",
+        "title": "%cmd.openSettings%",
+        "icon": "$(gear)"
       }
     ],
     "menus": {
@@ -74,6 +79,11 @@
           "command": "aiOffice.openInEditor",
           "when": "view == aiOffice.dashboard",
           "group": "navigation@1"
+        },
+        {
+          "command": "aiOffice.openSettings",
+          "when": "view == aiOffice.dashboard",
+          "group": "navigation@2"
         }
       ]
     },

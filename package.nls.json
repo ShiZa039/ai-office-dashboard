@@ -6,6 +6,7 @@
   "cmd.emergencyStop": "AI Office: Emergency Stop / Resume Agents",
   "cmd.clearEvents": "AI Office: Clear Events",
   "cmd.installHooks": "AI Office: Install Agent Hooks",
+  "cmd.openSettings": "AI Office: Open Settings",
   "cfg.language": "Dashboard UI language. \"system\" follows the OS language even when VSCode itself runs in English.",
   "cfg.language.system": "Operating system language (default)",
   "cfg.language.vscode": "VSCode display language",

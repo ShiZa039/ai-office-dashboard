@@ -6,6 +6,7 @@
   "cmd.emergencyStop": "AI Office: Экстренная остановка / возобновление агентов",
   "cmd.clearEvents": "AI Office: Очистить события",
   "cmd.installHooks": "AI Office: Установить хуки агентов",
+  "cmd.openSettings": "AI Office: Открыть настройки",
   "cfg.language": "Язык интерфейса дашборда. \"system\" следует языку ОС, даже если сам VSCode работает на английском.",
   "cfg.language.system": "Язык операционной системы (по умолчанию)",
   "cfg.language.vscode": "Язык интерфейса VSCode",

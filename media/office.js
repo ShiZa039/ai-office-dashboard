@@ -97,6 +97,7 @@ var MESSAGES = {
     paceOnPace: "on pace",
     paceRoom: "room to spare",
     paceTickHelp: "Where the bar would be if the window were used evenly",
+    settingsTitle: "Open AI Office settings",
     blockLeft: "{d} left",
     noActiveBlock: "no active block",
     unitMin: "m",
@@ -161,6 +162,7 @@ var MESSAGES = {
     paceOnPace: "по графику",
     paceRoom: "с запасом",
     paceTickHelp: "Где была бы полоска при равномерном расходе окна",
+    settingsTitle: "Открыть настройки AI Office",
     blockLeft: "осталось {d}",
     noActiveBlock: "нет активного блока",
     unitMin: "м",
@@ -357,6 +359,16 @@ function initIdleToggle() {
     hideIdle = !hideIdle;
     try { localStorage.setItem(HIDE_IDLE_KEY, hideIdle ? "1" : "0"); } catch(e) {}
     render();
+  });
+}
+
+function initSettingsButton() {
+  var btn = document.getElementById("settings-btn");
+  if (!btn) return;
+  btn.title = tr("settingsTitle");
+  btn.setAttribute("aria-label", tr("settingsTitle"));
+  btn.addEventListener("click", function() {
+    vscode.postMessage({ type: "open_settings" });
   });
 }
 
@@ -1239,6 +1251,7 @@ function renderUsageError(source, message) {
 localizeDom();
 initTimelineSelector();
 initIdleToggle();
+initSettingsButton();
 initStopControls();
 vscode.postMessage({ type: "webview_ready" });
 // A retained-but-hidden webview can miss messages (e.g. the stop-flag
