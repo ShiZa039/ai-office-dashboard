@@ -65,9 +65,9 @@
         <span class="stat-value stat-value--error" id="stat-errors">0</span>
         <span class="stat-label" data-i18n="labelErrors">errors</span>
       </div>
-      <div class="stat">
+      <div class="stat" id="stat-team" data-i18n-title="titleTeam">
         <span class="stat-value" id="stat-total">0</span>
-        <span class="stat-label" data-i18n="labelTotal">total</span>
+        <span class="stat-label" data-i18n="labelTeam">team</span>
       </div>
       <div class="stat">
         <span class="stat-value stat-value--session" id="stat-completed">0</span>
@@ -97,6 +97,20 @@
       <!-- Limit bars (with provider captions) are built dynamically from the API responses. -->
       <div class="usage-group" id="usage-subscription" hidden></div>
       <div class="usage-group" id="usage-kimi" hidden></div>
+      <!-- Token counters: current session and everything this project ever spent. -->
+      <div class="usage-group usage-tokens" id="usage-tokens" hidden>
+        <div class="usage-group-caption" data-i18n="labelTokens">Tokens</div>
+        <div class="token-row">
+          <span class="token-scope" data-i18n="tokensSession">session</span>
+          <span class="token-val token-val--in" id="tok-session-in">&mdash;</span>
+          <span class="token-val token-val--out" id="tok-session-out">&mdash;</span>
+        </div>
+        <div class="token-row">
+          <span class="token-scope" data-i18n="tokensTotal">total</span>
+          <span class="token-val token-val--in" id="tok-total-in">&mdash;</span>
+          <span class="token-val token-val--out" id="tok-total-out">&mdash;</span>
+        </div>
+      </div>
       <div class="usage-forecast" id="usage-forecast" hidden></div>
       <div class="usage-group" id="usage-cost" hidden>
         <div class="usage-bar" data-kind="block">

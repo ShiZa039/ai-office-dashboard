@@ -13,6 +13,7 @@ import {
   claudeUsageProvider,
 } from './subscriptionUsage';
 import { PaceStatus, nextAlertLevel } from './usagePace';
+import { PersistedTokenState, TokenScanner } from './tokenUsage';
 import { kimiUsageProvider } from './kimiUsage';
 import { discoverProjectAgents } from './agentRoster';
 import { ensureHooksOnActivation, installHooks } from './hookInstaller';
@@ -95,9 +96,20 @@ function usagePollSeconds(): number {
   return Math.max(30, v);
 }
 
+/**
+ * Transcripts grow while the model answers, so the token panel is polled far
+ * more often than the quota APIs — a pass costs one stat() per file of the
+ * project plus whatever bytes were appended since the last one.
+ */
+const TOKEN_POLL_MS = 15_000;
+/** How often the per-file token state is written back to workspaceState. */
+const TOKEN_PERSIST_MS = 5 * 60_000;
+const TOKEN_STATE_KEY = 'aiOffice.tokenState';
+
 let watcher: EventWatcher | null = null;
 let store: AgentStateStore | null = null;
 let costWatcher: UsageWatcher | null = null;
+let tokenTimer: NodeJS.Timeout | null = null;
 let subscriptionWatcher: SubscriptionUsageWatcher | null = null;
 let kimiUsageWatcher: SubscriptionUsageWatcher | null = null;
 const log = vscode.window.createOutputChannel('AI Office');
@@ -465,6 +477,59 @@ export function activate(context: vscode.ExtensionContext) {
     costWatcher.start();
   };
 
+  // --- Token counters (read straight from the CLI transcripts) ---
+
+  const tokensEnabled = () =>
+    vscode.workspace.getConfiguration('aiOffice').get<boolean>('usage.tokens', true);
+
+  const stopTokenWatcher = () => {
+    if (tokenTimer) {
+      clearInterval(tokenTimer);
+      tokenTimer = null;
+    }
+  };
+
+  const startTokenWatcher = () => {
+    stopTokenWatcher();
+    const root = path.join(os.homedir(), '.claude', 'projects');
+    const scanner = new TokenScanner(
+      root,
+      context.workspaceState.get<PersistedTokenState>(TOKEN_STATE_KEY),
+    );
+    scanner.setCwdFilter(currentCwdFilter());
+    let lastPersist = 0;
+    let lastFileSignature = '';
+    let firstPass = true;
+
+    const tick = async () => {
+      try {
+        await scanner.scan();
+        provider.updateTokens(scanner.snapshot(store?.getLastSession() ?? null));
+        // The per-file state only matters for retiring transcripts that VSCode
+        // never sees again, so it does not need to be written every pass.
+        const state = scanner.getState();
+        const signature = Object.keys(state.files).sort().join('|');
+        const now = Date.now();
+        if (signature !== lastFileSignature || now - lastPersist > TOKEN_PERSIST_MS) {
+          lastFileSignature = signature;
+          lastPersist = now;
+          void context.workspaceState.update(TOKEN_STATE_KEY, state);
+        }
+        if (firstPass) {
+          firstPass = false;
+          log.appendLine(
+            `AI Office: tokens — ${Object.keys(state.files).length} transcripts scanned under ${root}`,
+          );
+        }
+      } catch (err) {
+        log.appendLine(`AI Office: token scan failed: ${String(err)}`);
+      }
+    };
+
+    void tick();
+    tokenTimer = setInterval(() => void tick(), TOKEN_POLL_MS);
+  };
+
   const costSource = () =>
     vscode.workspace.getConfiguration('aiOffice').get<string>('usage.costSource', 'off');
 
@@ -474,6 +539,7 @@ export function activate(context: vscode.ExtensionContext) {
   if (usageEnabled()) {
     startSubscriptionWatcher();
     if (costSource() === 'ccusage') startCostWatcher();
+    if (tokensEnabled()) startTokenWatcher();
   }
 
   const cfgChange = vscode.workspace.onDidChangeConfiguration((e) => {
@@ -486,6 +552,8 @@ export function activate(context: vscode.ExtensionContext) {
       seedRoster(store);
       broadcastState();
       refreshStopState();
+      // Token totals are scoped the same way — rescan under the new filter.
+      if (usageEnabled() && tokensEnabled()) startTokenWatcher();
     }
     if (e.affectsConfiguration('aiOffice.roster') && store) {
       store.clear();
@@ -514,10 +582,15 @@ export function activate(context: vscode.ExtensionContext) {
     kimiUsageWatcher = null;
     costWatcher?.stop();
     costWatcher = null;
+    stopTokenWatcher();
     if (usageEnabled()) {
       startSubscriptionWatcher();
       if (costSource() === 'ccusage') startCostWatcher();
       else provider.resetCost();
+      if (tokensEnabled()) startTokenWatcher();
+      else provider.resetTokens();
+    } else {
+      provider.resetTokens();
     }
   });
 
@@ -529,6 +602,7 @@ export function activate(context: vscode.ExtensionContext) {
     seedRoster(store);
     broadcastState();
     refreshStopState();
+    if (usageEnabled() && tokensEnabled()) startTokenWatcher();
   });
 
   context.subscriptions.push(
@@ -558,5 +632,9 @@ export function deactivate() {
   if (kimiUsageWatcher) {
     kimiUsageWatcher.stop();
     kimiUsageWatcher = null;
+  }
+  if (tokenTimer) {
+    clearInterval(tokenTimer);
+    tokenTimer = null;
   }
 }

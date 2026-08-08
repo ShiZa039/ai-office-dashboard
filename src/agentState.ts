@@ -38,6 +38,8 @@ export class AgentStateStore {
   private waiting: SessionWaiting | null = null;
   /** Session ids whose main turn is currently running (user_prompt → Stop). */
   private mainSessions: Set<string> = new Set();
+  /** Newest session id seen for this cwd — survives session_stop (token panel). */
+  private lastSession: string | null = null;
 
   /** Provide a custom agent→room resolver (e.g. merged user config). */
   setRoomResolver(resolver: RoomResolver): void {
@@ -110,6 +112,10 @@ export class AgentStateStore {
     // via the transcript) — remember the newest one seen.
     if (event.model) {
       this.currentModel = event.model;
+    }
+
+    if (event.session) {
+      this.lastSession = event.session;
     }
 
     if (event.event === 'agent_start' || event.event === 'agent_stop') {
@@ -270,6 +276,11 @@ export class AgentStateStore {
     return this.waiting;
   }
 
+  /** Id of the newest session seen in this store's cwd, or null. */
+  getLastSession(): string | null {
+    return this.lastSession;
+  }
+
   clear(): void {
     for (const timer of this.doneTimers.values()) {
       clearTimeout(timer);
@@ -280,6 +291,7 @@ export class AgentStateStore {
     this.currentModel = null;
     this.waiting = null;
     this.mainSessions.clear();
+    this.lastSession = null;
   }
 
   /**

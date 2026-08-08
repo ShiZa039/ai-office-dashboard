@@ -22,6 +22,7 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
   private lastStop: { active: boolean; since: string | null } = { active: false, since: null };
   private lastSubscription: { claude: unknown; kimi: unknown } = { claude: null, kimi: null };
   private lastCost: unknown = null;
+  private lastTokens: unknown = null;
   private usageErrors: { claude: string | null; kimi: string | null; cost: string | null } = {
     claude: null,
     kimi: null,
@@ -142,6 +143,18 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
     this.pushUsage();
   }
 
+  /** Session / project token totals read from the transcripts. */
+  updateTokens(data: unknown): void {
+    this.lastTokens = data;
+    this.pushUsage();
+  }
+
+  /** Drop cached token totals (e.g. when the panel is switched off). */
+  resetTokens(): void {
+    this.lastTokens = null;
+    this.pushUsage();
+  }
+
   reportUsageError(source: 'claude' | 'kimi' | 'cost', message: string): void {
     this.usageErrors[source] = message;
     this.broadcast({ type: 'usage_error', source, message });
@@ -157,7 +170,7 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
   private pushUsage(): void {
     this.broadcast({
       type: 'usage_update',
-      data: { subscription: this.lastSubscription, cost: this.lastCost },
+      data: { subscription: this.lastSubscription, cost: this.lastCost, tokens: this.lastTokens },
     });
   }
 
@@ -207,10 +220,15 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
       });
     }
     webview.postMessage({ type: 'stop_state', ...this.lastStop });
-    if (this.lastSubscription.claude !== null || this.lastSubscription.kimi !== null || this.lastCost !== null) {
+    if (
+      this.lastSubscription.claude !== null ||
+      this.lastSubscription.kimi !== null ||
+      this.lastCost !== null ||
+      this.lastTokens !== null
+    ) {
       webview.postMessage({
         type: 'usage_update',
-        data: { subscription: this.lastSubscription, cost: this.lastCost },
+        data: { subscription: this.lastSubscription, cost: this.lastCost, tokens: this.lastTokens },
       });
     }
     for (const source of ['claude', 'kimi', 'cost'] as const) {

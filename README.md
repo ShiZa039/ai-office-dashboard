@@ -19,6 +19,7 @@ When you orchestrate several subagents in parallel, you lose track of who is doi
 - **A timeline** (Canvas) — who ran when, with a configurable window (5 min — 6 hours).
 - **An activity log** — the last 50 start/stop/waiting/stop-toggle events.
 - **Plan usage** — real subscription limits: the 5-hour session window and weekly limits, with percentages, reset times, a burn-pace indicator ("running hot / on pace / room to spare") with an even-pace tick on each bar, a forecast like "hits 100% in ~2h at the current pace", and quota degradation alerts. Same API as `/usage` in Claude Code; Kimi Code limits come from the Kimi Code API.
+- **Token counters** — incoming (prompt + cache write + cache read) and outgoing tokens for the current CLI session and for the project as a whole, read straight from the local transcripts (`~/.claude/projects/`) — no subprocess, no network. The project total spans every session ever recorded there and survives transcript pruning.
 - **Per-window isolation** — each VSCode window only sees its own sessions (filtered by workspace `cwd`).
 - **Localization** — en/ru UI, language taken from the OS (configurable).
 
@@ -102,6 +103,7 @@ For most projects the heuristics are enough — no configuration needed.
 | `aiOffice.usage.enabled` | `true` | Plan usage panel (real subscription limits) |
 | `aiOffice.usage.pollSeconds` | `90` | Usage refresh interval |
 | `aiOffice.usage.costSource` | `off` | `ccusage` = extra $-bars via `npx ccusage` |
+| `aiOffice.usage.tokens` | `true` | Token counters (this session / project total) read from the local transcripts |
 | `aiOffice.usage.limitBlockUsd` | `0` | $ limit per 5-hour block (ccusage bars only) |
 | `aiOffice.usage.limitWeeklyUsd` | `0` | $ limit per week (ccusage bars only) |
 | `aiOffice.usage.limitWeeklyOpusUsd` | `0` | $ limit per week for Opus (ccusage bars only) |

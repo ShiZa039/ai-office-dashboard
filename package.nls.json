@@ -22,6 +22,7 @@
   "cfg.usage.enabled": "Show plan usage panel (real subscription limits via your Claude Code / Kimi Code login)",
   "cfg.usage.pollSeconds": "Usage refresh seconds",
   "cfg.usage.costSource": "Additional cost-estimate bars (USD). \"ccusage\" spawns `npx ccusage` periodically",
+  "cfg.usage.tokens": "Show token counters (this session and the project total), read from the local Claude Code transcripts",
   "cfg.usage.limitBlockUsd": "Block limit USD (only for the ccusage cost bars)",
   "cfg.usage.limitWeeklyUsd": "Weekly limit USD (only for the ccusage cost bars)",
   "cfg.usage.limitWeeklyOpusUsd": "Opus weekly limit USD (only for the ccusage cost bars)",

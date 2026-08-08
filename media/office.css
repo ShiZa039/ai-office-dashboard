@@ -677,6 +677,36 @@ body {
   margin: 3px 0;
 }
 
+/* ── Token counters ── */
+.token-row {
+  display: grid;
+  grid-template-columns: 80px 1fr 1fr;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0;
+}
+
+.token-scope {
+  font-size: 9px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.token-val {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-align: right;
+  cursor: default;
+}
+
+.token-val--in { color: var(--blue); }
+.token-val--out { color: var(--green); }
+
 .usage-bar-label {
   font-size: 9px;
   color: var(--text-secondary);
