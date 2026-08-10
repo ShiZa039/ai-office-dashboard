@@ -126,10 +126,11 @@ var MESSAGES = {
     tokensContextTitle: "How full the session's context window is: the prompt size of the latest request vs the {model} window. Estimated from the transcript.",
     tokensSparkTitle: "Session token burn over the last 30 min: outgoing (green area), incoming incl. cache (blue line). Each series is scaled to its own peak.",
     tokens30d: "30 days ≈ {c} at API prices",
-    tokensVsSubSave: " · {plan} {s}/mo — subscription saves ×{n}",
-    tokensVsSubLose: " · {plan} {s}/mo — the API would be cheaper",
+    tokensAllTime: "all time ≈ {c} at API prices",
+    tokensVsSubSave: "{plan} {s}/mo — subscription saves ×{n}",
+    tokensVsSubLose: "{plan} {s}/mo — the API would be cheaper",
     tokensSubFallback: "subscription",
-    tokensSublineTitle: "API-equivalent cost of the last 30 days, computed from the local transcripts, vs your subscription price. Set the exact price in aiOffice.usage.subscriptionUsd (a trailing ? means the price was guessed from your plan).",
+    tokensSublineTitle: "API-equivalent cost, computed from the local transcripts: the last 30 days and the whole project history (pruned transcripts included). The subscription comparison uses the 30-day figure. Set the exact price in aiOffice.usage.subscriptionUsd (a trailing ? means the price was guessed from your plan).",
     labelTimeline: "Timeline",
     labelPlanUsage: "Plan usage",
     labelActivityLog: "Activity Log",
@@ -214,10 +215,11 @@ var MESSAGES = {
     tokensContextTitle: "Насколько заполнено контекстное окно сессии: размер промпта последнего запроса против окна {model}. Оценка по транскрипту.",
     tokensSparkTitle: "Расход токенов сессии за последние 30 мин: исходящие (зелёная область), входящие с кэшем (синяя линия). Каждый ряд нормирован на свой пик.",
     tokens30d: "за 30 дней ≈ {c} по ценам API",
-    tokensVsSubSave: " · {plan} {s}/мес — подписка выгоднее ×{n}",
-    tokensVsSubLose: " · {plan} {s}/мес — по API вышло бы дешевле",
+    tokensAllTime: "за всё время ≈ {c} по ценам API",
+    tokensVsSubSave: "{plan} {s}/мес — подписка выгоднее ×{n}",
+    tokensVsSubLose: "{plan} {s}/мес — по API вышло бы дешевле",
     tokensSubFallback: "подписка",
-    tokensSublineTitle: "Стоимость последних 30 дней по ценам API (по локальным транскриптам) против цены подписки. Точную цену можно задать в aiOffice.usage.subscriptionUsd (знак ? — цена угадана по плану).",
+    tokensSublineTitle: "Стоимость по ценам API (по локальным транскриптам): за последние 30 дней и за всю историю проекта (включая удалённые транскрипты). Сравнение с подпиской — по цифре за 30 дней. Точную цену можно задать в aiOffice.usage.subscriptionUsd (знак ? — цена угадана по плану).",
     labelTimeline: "Таймлайн",
     labelPlanUsage: "Лимиты плана",
     labelActivityLog: "Журнал активности",
@@ -1375,26 +1377,30 @@ function renderTokenContext(context) {
   box.title = tr("tokensContextTitle", { model: formatModelName(context.model) || context.model });
 }
 
-/** "30 days ≈ $142 at API prices · Max $100/mo — subscription saves ×1.4". */
+/** Up to three lines: "30 days ≈ $142…", "all time ≈ $210…", "Max $100/mo — saves ×1.4". */
 function renderTokenSubline(tokens) {
   var el = document.getElementById("token-subline");
   if (!el) return;
-  if (tokens.last30dCostUsd == null) {
+  var c30 = tokens.last30dCostUsd;
+  var cAll = tokens.totalCostUsd;
+  if (c30 == null && cAll == null) {
     el.hidden = true;
     return;
   }
   el.hidden = false;
-  var txt = tr("tokens30d", { c: formatUsd(tokens.last30dCostUsd) });
+  var lines = [];
+  if (c30 != null) lines.push(tr("tokens30d", { c: formatUsd(c30) }));
+  if (cAll != null) lines.push(tr("tokensAllTime", { c: formatUsd(cAll) }));
   var sub = tokens.subscription;
-  if (sub && sub.monthlyUsd > 0) {
+  if (c30 != null && sub && sub.monthlyUsd > 0) {
     var ratio = tokens.last30dCostUsd / sub.monthlyUsd;
-    txt += tr(ratio >= 1 ? "tokensVsSubSave" : "tokensVsSubLose", {
+    lines.push(tr(ratio >= 1 ? "tokensVsSubSave" : "tokensVsSubLose", {
       plan: planLabel(sub.plan) || tr("tokensSubFallback"),
       s: formatUsd(sub.monthlyUsd) + (sub.guessed ? "?" : ""),
       n: (Math.round(ratio * 10) / 10),
-    });
+    }));
   }
-  el.textContent = txt;
+  el.textContent = lines.join("\n");
   el.title = tr("tokensSublineTitle");
 }
 

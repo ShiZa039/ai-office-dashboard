@@ -754,13 +754,15 @@ body {
   margin-top: 3px;
 }
 
-/* "30 days at API prices vs subscription" summary line. */
+/* "30 days at API prices vs subscription" summary, one fact per line. */
 .token-subline {
   font-size: 9px;
   color: var(--text-secondary);
   margin-top: 4px;
   padding-top: 3px;
   border-top: 1px dashed var(--room-border);
+  white-space: pre-line;
+  line-height: 1.5;
 }
 
 .token-subline b { color: var(--yellow); font-weight: 600; }
