@@ -680,7 +680,7 @@ body {
 /* ── Token counters ── */
 .token-row {
   display: grid;
-  grid-template-columns: 80px 1fr 1fr;
+  grid-template-columns: 64px 1fr 1fr 1fr;
   align-items: center;
   gap: 6px;
   margin: 2px 0;
@@ -706,6 +706,64 @@ body {
 
 .token-val--in { color: var(--blue); }
 .token-val--out { color: var(--green); }
+.token-val--cost { color: var(--yellow); }
+
+/* Context-window gauge of the current session. */
+.token-context {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 3px 0 1px;
+}
+
+.token-context-track {
+  flex: 1;
+  position: relative;
+  height: 4px;
+  border-radius: 2px;
+  background: #2a2a2a;
+  overflow: hidden;
+}
+
+.token-context-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-radius: 2px;
+  background: var(--blue);
+  transition: width 0.4s ease;
+}
+
+.token-context-fill--warn { background: var(--yellow); }
+.token-context-fill--crit { background: var(--red); }
+
+.token-context-val {
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* Burn sparkline: session token rate over the last 30 minutes. */
+.token-spark {
+  display: block;
+  width: 100%;
+  height: 26px;
+  margin-top: 3px;
+}
+
+/* "30 days at API prices vs subscription" summary line. */
+.token-subline {
+  font-size: 9px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+  padding-top: 3px;
+  border-top: 1px dashed var(--room-border);
+}
+
+.token-subline b { color: var(--yellow); font-weight: 600; }
 
 .usage-bar-label {
   font-size: 9px;

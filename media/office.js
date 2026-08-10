@@ -120,6 +120,16 @@ var MESSAGES = {
     tokensCacheRead: "cache read",
     tokensByModel: "by model",
     tokensModelUnknown: "model not recorded",
+    tokensCostApprox: "What this would cost at API list prices (cache writes and reads included). Models without a known price are not counted.",
+    tokensCostByModel: "cost by model",
+    tokensContext: "context",
+    tokensContextTitle: "How full the session's context window is: the prompt size of the latest request vs the {model} window. Estimated from the transcript.",
+    tokensSparkTitle: "Session token burn over the last 30 min: outgoing (green area), incoming incl. cache (blue line). Each series is scaled to its own peak.",
+    tokens30d: "30 days ≈ {c} at API prices",
+    tokensVsSubSave: " · {plan} {s}/mo — subscription saves ×{n}",
+    tokensVsSubLose: " · {plan} {s}/mo — the API would be cheaper",
+    tokensSubFallback: "subscription",
+    tokensSublineTitle: "API-equivalent cost of the last 30 days, computed from the local transcripts, vs your subscription price. Set the exact price in aiOffice.usage.subscriptionUsd (a trailing ? means the price was guessed from your plan).",
     labelTimeline: "Timeline",
     labelPlanUsage: "Plan usage",
     labelActivityLog: "Activity Log",
@@ -198,6 +208,16 @@ var MESSAGES = {
     tokensCacheRead: "чтение кэша",
     tokensByModel: "по моделям",
     tokensModelUnknown: "модель не записана",
+    tokensCostApprox: "Сколько это стоило бы по ценам API (запись и чтение кэша учтены). Модели без известной цены не считаются.",
+    tokensCostByModel: "стоимость по моделям",
+    tokensContext: "контекст",
+    tokensContextTitle: "Насколько заполнено контекстное окно сессии: размер промпта последнего запроса против окна {model}. Оценка по транскрипту.",
+    tokensSparkTitle: "Расход токенов сессии за последние 30 мин: исходящие (зелёная область), входящие с кэшем (синяя линия). Каждый ряд нормирован на свой пик.",
+    tokens30d: "за 30 дней ≈ {c} по ценам API",
+    tokensVsSubSave: " · {plan} {s}/мес — подписка выгоднее ×{n}",
+    tokensVsSubLose: " · {plan} {s}/мес — по API вышло бы дешевле",
+    tokensSubFallback: "подписка",
+    tokensSublineTitle: "Стоимость последних 30 дней по ценам API (по локальным транскриптам) против цены подписки. Точную цену можно задать в aiOffice.usage.subscriptionUsd (знак ? — цена угадана по плану).",
     labelTimeline: "Таймлайн",
     labelPlanUsage: "Лимиты плана",
     labelActivityLog: "Журнал активности",
@@ -1305,6 +1325,181 @@ function modelBreakdown(byModel, metric) {
   }).join("");
 }
 
+/** "≈ $4.20" cell with a per-model cost breakdown in the tooltip. */
+function fillCostCell(id, cost, scopeTitle, byModel) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  if (cost == null) {
+    el.textContent = "—";
+    el.title = scopeTitle + "\n" + tr("tokensCostApprox");
+    return;
+  }
+  el.textContent = "≈ " + formatUsd(cost);
+  var title = scopeTitle + "\n" + tr("tokensCostApprox");
+  if (byModel && byModel.length) {
+    var rows = byModel
+      .filter(function (s) { return s.costUsd != null && s.costUsd > 0; })
+      .sort(function (a, b) { return b.costUsd - a.costUsd; });
+    if (rows.length) {
+      title += "\n" + tr("tokensCostByModel") + ":" + rows.map(function (r) {
+        return "\n  " + (r.model || tr("tokensModelUnknown")) + ": " + formatUsd(r.costUsd);
+      }).join("");
+    }
+  }
+  el.title = title;
+}
+
+/** Context-window gauge: prompt size of the session's latest request vs the window. */
+function renderTokenContext(context) {
+  var box = document.getElementById("token-context");
+  if (!box) return;
+  if (!context || !context.window || !(context.tokens > 0)) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  var pct = Math.min(100, (context.tokens / context.window) * 100);
+  var fill = box.querySelector(".token-context-fill");
+  if (fill instanceof HTMLElement) {
+    fill.style.width = pct.toFixed(1) + "%";
+    fill.classList.remove("token-context-fill--warn", "token-context-fill--crit");
+    if (pct >= 90) fill.classList.add("token-context-fill--crit");
+    else if (pct >= 70) fill.classList.add("token-context-fill--warn");
+  }
+  var val = box.querySelector(".token-context-val");
+  if (val) {
+    val.textContent =
+      formatTokens(context.tokens) + " / " + formatTokens(context.window) +
+      " (" + pct.toFixed(0) + "%)";
+  }
+  box.title = tr("tokensContextTitle", { model: formatModelName(context.model) || context.model });
+}
+
+/** "30 days ≈ $142 at API prices · Max $100/mo — subscription saves ×1.4". */
+function renderTokenSubline(tokens) {
+  var el = document.getElementById("token-subline");
+  if (!el) return;
+  if (tokens.last30dCostUsd == null) {
+    el.hidden = true;
+    return;
+  }
+  el.hidden = false;
+  var txt = tr("tokens30d", { c: formatUsd(tokens.last30dCostUsd) });
+  var sub = tokens.subscription;
+  if (sub && sub.monthlyUsd > 0) {
+    var ratio = tokens.last30dCostUsd / sub.monthlyUsd;
+    txt += tr(ratio >= 1 ? "tokensVsSubSave" : "tokensVsSubLose", {
+      plan: planLabel(sub.plan) || tr("tokensSubFallback"),
+      s: formatUsd(sub.monthlyUsd) + (sub.guessed ? "?" : ""),
+      n: (Math.round(ratio * 10) / 10),
+    });
+  }
+  el.textContent = txt;
+  el.title = tr("tokensSublineTitle");
+}
+
+// ── Burn sparkline ──
+// Cumulative session totals are sampled on every token update; the deltas
+// between samples become a 30-minute rate chart. Persisted in localStorage so
+// webview reloads keep the trend; a new session id starts a fresh chart.
+var TOKEN_SPARK_KEY = "aiOffice.tokenSpark";
+var SPARK_WINDOW_MS = 30 * 60000;
+var SPARK_MAX_SAMPLES = 200;
+var tokenSpark = { id: null, samples: [] };
+try {
+  var savedSpark = localStorage.getItem(TOKEN_SPARK_KEY);
+  if (savedSpark) tokenSpark = JSON.parse(savedSpark) || tokenSpark;
+} catch (e) { /* localStorage unavailable */ }
+
+function recordSparkSample(session, fetchedAt) {
+  if (!session || !session.totals) return;
+  var t = Date.parse(fetchedAt || "");
+  if (isNaN(t)) t = Date.now();
+  if (tokenSpark.id !== session.id) tokenSpark = { id: session.id, samples: [] };
+  var totals = session.totals;
+  var arr = tokenSpark.samples;
+  var last = arr[arr.length - 1];
+  if (last && last.t >= t) return; // same snapshot re-broadcast
+  arr.push({
+    t: t,
+    i: (totals.input || 0) + (totals.cacheCreate || 0) + (totals.cacheRead || 0),
+    o: totals.output || 0,
+  });
+  while (arr.length > 0 && t - arr[0].t > SPARK_WINDOW_MS) arr.shift();
+  while (arr.length > SPARK_MAX_SAMPLES) arr.shift();
+  try { localStorage.setItem(TOKEN_SPARK_KEY, JSON.stringify(tokenSpark)); } catch (e) {}
+}
+
+function renderTokenSpark() {
+  var canvas = document.getElementById("token-spark");
+  if (!canvas || !(canvas instanceof HTMLCanvasElement)) return;
+  // Cumulative counters can only grow within one session; a drop means the
+  // scope changed under us — clamp the delta rather than plotting nonsense.
+  var arr = tokenSpark.samples;
+  var pts = [];
+  for (var i = 1; i < arr.length; i++) {
+    var dtMin = (arr[i].t - arr[i - 1].t) / 60000;
+    if (dtMin <= 0) continue;
+    pts.push({
+      t: arr[i].t,
+      iRate: Math.max(0, arr[i].i - arr[i - 1].i) / dtMin,
+      oRate: Math.max(0, arr[i].o - arr[i - 1].o) / dtMin,
+    });
+  }
+  if (pts.length < 2) {
+    canvas.hidden = true;
+    return;
+  }
+  canvas.hidden = false;
+  canvas.title = tr("tokensSparkTitle");
+  var dpr = window.devicePixelRatio || 1;
+  var rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  var ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  ctx.scale(dpr, dpr);
+  var W = rect.width, H = rect.height;
+  ctx.clearRect(0, 0, W, H);
+
+  var start = Date.now() - SPARK_WINDOW_MS;
+  var maxI = 0, maxO = 0;
+  for (var m = 0; m < pts.length; m++) {
+    if (pts[m].iRate > maxI) maxI = pts[m].iRate;
+    if (pts[m].oRate > maxO) maxO = pts[m].oRate;
+  }
+  function sx(t) { return Math.max(0, Math.min(W, ((t - start) / SPARK_WINDOW_MS) * W)); }
+  function sy(rate, max) { return H - 1 - (max > 0 ? (rate / max) * (H - 4) : 0); }
+
+  if (maxO > 0) {
+    ctx.beginPath();
+    ctx.moveTo(sx(pts[0].t), H);
+    for (var a = 0; a < pts.length; a++) ctx.lineTo(sx(pts[a].t), sy(pts[a].oRate, maxO));
+    ctx.lineTo(sx(pts[pts.length - 1].t), H);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(34, 197, 94, 0.25)";
+    ctx.fill();
+    ctx.beginPath();
+    for (var b = 0; b < pts.length; b++) {
+      var px = sx(pts[b].t), py = sy(pts[b].oRate, maxO);
+      if (b === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.strokeStyle = "rgba(34, 197, 94, 0.9)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+  if (maxI > 0) {
+    ctx.beginPath();
+    for (var c = 0; c < pts.length; c++) {
+      var qx = sx(pts[c].t), qy = sy(pts[c].iRate, maxI);
+      if (c === 0) ctx.moveTo(qx, qy); else ctx.lineTo(qx, qy);
+    }
+    ctx.strokeStyle = "rgba(59, 130, 246, 0.65)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+}
+
 function renderTokens(tokens) {
   var section = document.getElementById("usage-tokens");
   if (!(section instanceof HTMLElement)) return;
@@ -1325,6 +1520,17 @@ function renderTokens(tokens) {
     tr("tokensTotalTitle"),
     tokens.byModel,
   );
+  fillCostCell(
+    "tok-session-cost",
+    tokens.session ? tokens.session.costUsd : null,
+    tr("tokensSessionTitle"),
+    tokens.session ? tokens.session.byModel : null,
+  );
+  fillCostCell("tok-total-cost", tokens.totalCostUsd, tr("tokensTotalTitle"), tokens.byModel);
+  renderTokenContext(tokens.session ? tokens.session.context : null);
+  recordSparkSample(tokens.session, tokens.fetchedAt);
+  renderTokenSpark();
+  renderTokenSubline(tokens);
 }
 
 function renderUsage() {

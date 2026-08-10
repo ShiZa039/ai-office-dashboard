@@ -104,12 +104,24 @@
           <span class="token-scope" data-i18n="tokensSession">session</span>
           <span class="token-val token-val--in" id="tok-session-in">&mdash;</span>
           <span class="token-val token-val--out" id="tok-session-out">&mdash;</span>
+          <span class="token-val token-val--cost" id="tok-session-cost">&mdash;</span>
         </div>
         <div class="token-row">
           <span class="token-scope" data-i18n="tokensTotal">total</span>
           <span class="token-val token-val--in" id="tok-total-in">&mdash;</span>
           <span class="token-val token-val--out" id="tok-total-out">&mdash;</span>
+          <span class="token-val token-val--cost" id="tok-total-cost">&mdash;</span>
         </div>
+        <!-- Context-window gauge of the current session (estimated from the transcript). -->
+        <div class="token-context" id="token-context" hidden>
+          <span class="token-scope" data-i18n="tokensContext">context</span>
+          <div class="token-context-track"><div class="token-context-fill"></div></div>
+          <span class="token-context-val">&mdash;</span>
+        </div>
+        <!-- Burn sparkline: token rate of the current session over the last 30 min. -->
+        <canvas id="token-spark" class="token-spark" hidden></canvas>
+        <!-- API-equivalent cost of the last 30 days vs the subscription price. -->
+        <div class="token-subline" id="token-subline" hidden></div>
       </div>
       <div class="usage-forecast" id="usage-forecast" hidden></div>
       <div class="usage-group" id="usage-cost" hidden>

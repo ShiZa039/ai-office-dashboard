@@ -482,6 +482,26 @@ export function activate(context: vscode.ExtensionContext) {
   const tokensEnabled = () =>
     vscode.workspace.getConfiguration('aiOffice').get<boolean>('usage.tokens', true);
 
+  /**
+   * Monthly subscription price for the "API-equivalent cost vs subscription"
+   * line. Explicit setting wins; 0 = guess from the plan the Claude login
+   * reports (Pro ≈ $20, Max ≈ $100, Max 20x ≈ $200). null = nothing to show.
+   */
+  const subscriptionPriceUsd = (): { monthlyUsd: number; plan: string | null; guessed: boolean } | null => {
+    const configured = vscode.workspace
+      .getConfiguration('aiOffice')
+      .get<number>('usage.subscriptionUsd', 0);
+    const plan = lastQuotas.claude?.plan ?? null;
+    if (configured > 0) return { monthlyUsd: configured, plan, guessed: false };
+    if (!plan) return null;
+    const p = plan.toLowerCase();
+    if (p.includes('pro')) return { monthlyUsd: 20, plan, guessed: true };
+    if (p.includes('max')) {
+      return { monthlyUsd: p.includes('20') ? 200 : 100, plan, guessed: true };
+    }
+    return null;
+  };
+
   const stopTokenWatcher = () => {
     if (tokenTimer) {
       clearInterval(tokenTimer);
@@ -504,7 +524,10 @@ export function activate(context: vscode.ExtensionContext) {
     const tick = async () => {
       try {
         await scanner.scan();
-        provider.updateTokens(scanner.snapshot(store?.getLastSession() ?? null));
+        provider.updateTokens({
+          ...scanner.snapshot(store?.getLastSession() ?? null),
+          subscription: subscriptionPriceUsd(),
+        });
         // The per-file state only matters for retiring transcripts that VSCode
         // never sees again, so it does not need to be written every pass.
         const state = scanner.getState();

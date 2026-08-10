@@ -23,6 +23,7 @@
   "cfg.usage.pollSeconds": "Usage refresh seconds",
   "cfg.usage.costSource": "Additional cost-estimate bars (USD). \"ccusage\" spawns `npx ccusage` periodically",
   "cfg.usage.tokens": "Show token counters (this session and the project total), read from the local Claude Code transcripts",
+  "cfg.usage.subscriptionUsd": "Monthly price of your subscription in USD, for the \"API-equivalent cost vs subscription\" line under the token counters. 0 = guess from the plan reported by your login (Pro ≈ $20, Max ≈ $100/$200)",
   "cfg.usage.limitBlockUsd": "Block limit USD (only for the ccusage cost bars)",
   "cfg.usage.limitWeeklyUsd": "Weekly limit USD (only for the ccusage cost bars)",
   "cfg.usage.limitWeeklyOpusUsd": "Opus weekly limit USD (only for the ccusage cost bars)",

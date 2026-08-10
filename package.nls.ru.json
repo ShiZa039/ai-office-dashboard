@@ -23,6 +23,7 @@
   "cfg.usage.pollSeconds": "Интервал обновления usage, секунды",
   "cfg.usage.costSource": "Дополнительные бары $-оценок расхода. \"ccusage\" периодически запускает `npx ccusage`",
   "cfg.usage.tokens": "Показывать счётчики токенов (текущая сессия и всего по проекту), считаются по локальным транскриптам Claude Code",
+  "cfg.usage.subscriptionUsd": "Месячная цена вашей подписки в $, для строки «стоимость по API против подписки» под счётчиками токенов. 0 = угадать по плану из логина (Pro ≈ $20, Max ≈ $100/$200)",
   "cfg.usage.limitBlockUsd": "Лимит $ на 5-часовой блок (только для ccusage-баров)",
   "cfg.usage.limitWeeklyUsd": "Лимит $ на неделю (только для ccusage-баров)",
   "cfg.usage.limitWeeklyOpusUsd": "Лимит $ на неделю Opus (только для ccusage-баров)",

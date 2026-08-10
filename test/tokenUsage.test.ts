@@ -67,7 +67,10 @@ interface EntryOpts {
   output?: number;
   cacheCreate?: number;
   cacheRead?: number;
+  /** 1h-TTL share of cacheCreate, as `usage.cache_creation` reports it. */
+  cache1h?: number;
   model?: string;
+  sidechain?: boolean;
 }
 
 function entry(o: EntryOpts): string {
@@ -78,6 +81,7 @@ function entry(o: EntryOpts): string {
       timestamp: new Date(clock).toISOString(),
       sessionId: o.session,
       cwd: o.cwd ?? cwd,
+      isSidechain: o.sidechain ?? false,
       requestId: o.requestId ?? 'req-' + (o.id ?? 'x'),
       message: {
         id: o.id ?? 'msg-1',
@@ -87,6 +91,7 @@ function entry(o: EntryOpts): string {
           output_tokens: o.output ?? 0,
           cache_creation_input_tokens: o.cacheCreate ?? 0,
           cache_read_input_tokens: o.cacheRead ?? 0,
+          cache_creation: { ephemeral_1h_input_tokens: o.cache1h ?? 0 },
         },
       },
     }) + '\n'
@@ -121,10 +126,32 @@ async function main(): Promise<void> {
   let snap = scanner.snapshot('aaaa-1111');
   assert.deepStrictEqual(
     snap.total,
-    { input: 15, output: 150, cacheCreate: 20, cacheRead: 700 },
+    { input: 15, output: 150, cacheCreate: 20, cacheRead: 700, cacheCreate1h: 0 },
     'usage blocks summed',
   );
   assert.strictEqual(snap.session?.id, 'aaaa-1111', 'requested session found');
+
+  // --- cost and context ride the same snapshot ---
+
+  const expectedCost = (15 * 5 + 150 * 25 + 20 * 5 * 1.25 + 700 * 5 * 0.1) / 1e6;
+  assert.ok(
+    Math.abs((snap.session?.costUsd ?? 0) - expectedCost) < 1e-12,
+    'session cost at opus list prices',
+  );
+  assert.ok(
+    Math.abs((snap.totalCostUsd ?? 0) - expectedCost) < 1e-12,
+    'project cost matches while there is a single session',
+  );
+  assert.ok(
+    Math.abs((snap.last30dCostUsd ?? 0) - expectedCost) < 1e-12,
+    'the 30-day figure covers fresh entries',
+  );
+  assert.strictEqual(
+    snap.session?.context?.tokens,
+    405,
+    'context = prompt size of the latest request (input + both caches)',
+  );
+  assert.strictEqual(snap.session?.context?.window, 200_000, 'opus window defaults to 200K');
   assert.strictEqual(incomingTokens(snap.total), 735, 'incoming = prompt + both caches');
   assert.deepStrictEqual(
     snap.byModel.map((s) => s.model),
@@ -156,6 +183,28 @@ async function main(): Promise<void> {
   await scanner.scan();
   snap = scanner.snapshot('aaaa-1111');
   assert.strictEqual(snap.total.output, 157, 'incremental append counted exactly once');
+  assert.strictEqual(snap.session?.context?.tokens, 11, 'context follows the newest request');
+
+  // --- sidechain (subagent) requests don't move the context gauge ---
+
+  append(
+    sessionA,
+    entry({ session: 'aaaa-1111', id: 'side', input: 90000, cacheRead: 90000, sidechain: true }),
+  );
+  await scanner.scan();
+  snap = scanner.snapshot('aaaa-1111');
+  assert.strictEqual(
+    snap.session?.context?.tokens,
+    11,
+    'a subagent request has its own context and is not the gauge',
+  );
+
+  // --- the 1h share of cache writes is tracked for the 2x pricing ---
+
+  append(sessionA, entry({ session: 'aaaa-1111', id: 'ttl', cacheCreate: 1000, cache1h: 400 }));
+  await scanner.scan();
+  snap = scanner.snapshot('aaaa-1111');
+  assert.strictEqual(snap.total.cacheCreate1h, 400, 'the TTL split rides along the totals');
 
   // --- a line still being written is picked up only once it is complete ---
 
@@ -345,7 +394,7 @@ async function main(): Promise<void> {
 
   assert.deepStrictEqual(
     emptyTotals(),
-    { input: 0, output: 0, cacheCreate: 0, cacheRead: 0 },
+    { input: 0, output: 0, cacheCreate: 0, cacheRead: 0, cacheCreate1h: 0 },
     'emptyTotals is zeroed',
   );
 

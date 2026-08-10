@@ -4,7 +4,7 @@
 
 > A VSCode extension that visualizes Claude Code and Kimi Code CLI activity as an office floor map. Every subagent shows up as a figure in its own "room" (Backend, Frontend, QA, Security, DevOps, AI-lab, etc.), pulses while working, and gets a checkmark when done. On top: a main-model indicator, subscription usage limits, and an emergency stop button.
 
-**Current version:** `v0.16.0` · zero-config: dual CLI support (Claude Code + Kimi Code), automatic hook installation, agent auto-discovery, dynamic rooms, real Pro/Max plan limits, agent emergency stop, en/ru UI.
+**Current version:** `v0.18.0` · zero-config: dual CLI support (Claude Code + Kimi Code), automatic hook installation, agent auto-discovery, dynamic rooms, real Pro/Max plan limits, token & cost counters, agent emergency stop, en/ru UI.
 
 ---
 
@@ -20,6 +20,9 @@ When you orchestrate several subagents in parallel, you lose track of who is doi
 - **An activity log** — the last 50 start/stop/waiting/stop-toggle events.
 - **Plan usage** — real subscription limits: the 5-hour session window and weekly limits, with percentages, reset times, a burn-pace indicator ("running hot / on pace / room to spare") with an even-pace tick on each bar, a forecast like "hits 100% in ~2h at the current pace", and quota degradation alerts. Same API as `/usage` in Claude Code; Kimi Code limits come from the Kimi Code API.
 - **Token counters** — incoming (prompt + cache write + cache read) and outgoing tokens for the current CLI session and for the project as a whole, read straight from the local transcripts (`~/.claude/projects/`) — no subprocess, no network. The project total spans every session ever recorded there and survives transcript pruning. Hovering a counter breaks it down by kind (prompt / cache write / cache read) and by model — Opus, Sonnet, the Haiku behind background tasks, or whatever else the CLI logged.
+- **API-equivalent cost ($)** — a third column next to the token counters prices the session and the project at public API list rates (cache writes ×1.25/×2 by TTL, cache reads ×0.1), with a per-model cost breakdown in the tooltip. Below, a summary line compares the last 30 days against your subscription price — "30 days ≈ $142 at API prices · Max $100/mo — subscription saves ×1.4". The subscription price comes from `aiOffice.usage.subscriptionUsd`, or is guessed from your plan when unset. Models without a known price (e.g. Kimi) are excluded rather than counted as zero.
+- **Context gauge** — how full the current session's context window is: the prompt size of the latest request vs the model's window (200K, or 1M for `[1m]` models), with yellow/red thresholds at 70/90%. Subagent (sidechain) requests have their own context and don't move the gauge.
+- **Burn sparkline** — the session's token rate (tokens/min) over the last 30 minutes: outgoing as a green area, incoming (cache included) as a blue line.
 - **Per-window isolation** — each VSCode window only sees its own sessions (filtered by workspace `cwd`).
 - **Localization** — en/ru UI, language taken from the OS (configurable).
 
@@ -28,7 +31,7 @@ When you orchestrate several subagents in parallel, you lose track of who is doi
 1. Install the `.vsix`:
 
    ```
-   code --install-extension ai-office-dashboard-0.16.0.vsix --force
+   code --install-extension ai-office-dashboard-0.18.0.vsix --force
    ```
 
 2. Reload Window → a house icon appears in the Activity Bar.
@@ -104,6 +107,7 @@ For most projects the heuristics are enough — no configuration needed.
 | `aiOffice.usage.pollSeconds` | `90` | Usage refresh interval |
 | `aiOffice.usage.costSource` | `off` | `ccusage` = extra $-bars via `npx ccusage` |
 | `aiOffice.usage.tokens` | `true` | Token counters (this session / project total) read from the local transcripts |
+| `aiOffice.usage.subscriptionUsd` | `0` | Monthly subscription price ($) for the "API cost vs subscription" line; 0 = guess from the plan (Pro ≈ $20, Max ≈ $100/$200) |
 | `aiOffice.usage.limitBlockUsd` | `0` | $ limit per 5-hour block (ccusage bars only) |
 | `aiOffice.usage.limitWeeklyUsd` | `0` | $ limit per week (ccusage bars only) |
 | `aiOffice.usage.limitWeeklyOpusUsd` | `0` | $ limit per week for Opus (ccusage bars only) |

@@ -21,6 +21,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
+import { contextWindowTokens, costOfModels, costUsd } from './pricing';
 
 export interface TokenTotals {
   /** Plain (uncached) prompt tokens. */
@@ -28,6 +29,12 @@ export interface TokenTotals {
   output: number;
   cacheCreate: number;
   cacheRead: number;
+  /**
+   * The 1-hour-TTL share of `cacheCreate` (billed at 2× instead of 1.25×).
+   * Optional: pre-v0.18 persisted totals don't carry it — treated as 0, i.e.
+   * everything priced as the cheaper 5m writes.
+   */
+  cacheCreate1h?: number;
 }
 
 /**
@@ -53,6 +60,15 @@ export interface ModelSlice {
   /** Display name, e.g. "Opus 4.5"; `''` when the model was not recorded. */
   model: string;
   totals: TokenTotals;
+  /** API-list-price cost of this slice; null when the model is unpriced. */
+  costUsd?: number | null;
+}
+
+/** Size of one request's prompt — proxy for "how full is the context". */
+interface ContextSample {
+  ts: number;
+  tokens: number;
+  model: string;
 }
 
 interface FileState {
@@ -61,6 +77,14 @@ interface FileState {
   buckets: Map<string, Bucket>;
   /** Newest entry timestamp seen per session, for "which session is current". */
   lastTs: Map<string, number>;
+  /** Latest main-chain request per session (sidechains have their own context). */
+  lastCtx: Map<string, ContextSample>;
+  /**
+   * `YYYY-MM-DD <cwd>` (day is fixed-width) → priced $ spent that day.
+   * In-memory only (rebuilt by the full rescan on restart, like the buckets)
+   * — feeds the 30-day figure.
+   */
+  days: Map<string, number>;
 }
 
 /** Shape persisted between windows/restarts (VSCode workspaceState). */
@@ -79,17 +103,41 @@ interface PersistedTokenStateV1 {
   files: Record<string, { cwd: string; session: string; totals: TokenTotals }[]>;
 }
 
+/** Session context gauge: how full the model's window is right now. */
+export interface ContextGauge {
+  /** Prompt size of the session's latest request (input + both cache kinds). */
+  tokens: number;
+  /** Assumed window size for that model; null → unknown, no gauge. */
+  window: number | null;
+  /** Raw model id the sample came from. */
+  model: string;
+}
+
 export interface TokenSnapshot {
   fetchedAt: string;
   /** null until a session of this project is known. */
-  session: { id: string; totals: TokenTotals; byModel: ModelSlice[] } | null;
+  session: {
+    id: string;
+    totals: TokenTotals;
+    byModel: ModelSlice[];
+    /** API-list-price cost of the session; null when nothing was priceable. */
+    costUsd: number | null;
+    context: ContextGauge | null;
+  } | null;
   total: TokenTotals;
   /** Project-wide split, biggest spender first. */
   byModel: ModelSlice[];
+  /** API-list-price cost of the whole project (retired transcripts included). */
+  totalCostUsd: number | null;
+  /**
+   * Priced spend of the last 30 days (live transcripts only — files already
+   * pruned by the CLI can't contribute). null until anything was priced.
+   */
+  last30dCostUsd: number | null;
 }
 
 export function emptyTotals(): TokenTotals {
-  return { input: 0, output: 0, cacheCreate: 0, cacheRead: 0 };
+  return { input: 0, output: 0, cacheCreate: 0, cacheRead: 0, cacheCreate1h: 0 };
 }
 
 export function addTotals(target: TokenTotals, add: TokenTotals): TokenTotals {
@@ -97,6 +145,7 @@ export function addTotals(target: TokenTotals, add: TokenTotals): TokenTotals {
   target.output += add.output;
   target.cacheCreate += add.cacheCreate;
   target.cacheRead += add.cacheRead;
+  target.cacheCreate1h = (target.cacheCreate1h ?? 0) + (add.cacheCreate1h ?? 0);
   return target;
 }
 
@@ -170,14 +219,19 @@ export function modelLabel(raw: string): string {
 
 /** Raw-id buckets → display slices, biggest incoming spend first. */
 function modelSlices(byModel: Record<string, TokenTotals>): ModelSlice[] {
-  const merged = new Map<string, TokenTotals>();
+  const merged = new Map<string, { totals: TokenTotals; costUsd: number | null }>();
   for (const [raw, totals] of Object.entries(byModel)) {
     const label = modelLabel(raw);
-    const acc = merged.get(label) ?? emptyTotals();
-    merged.set(label, addTotals(acc, totals));
+    const acc = merged.get(label) ?? { totals: emptyTotals(), costUsd: null };
+    addTotals(acc.totals, totals);
+    // Different raw ids can fold into one label; a priced id keeps its cost
+    // even when an unpriced sibling folds in beside it.
+    const c = costUsd(raw, totals);
+    if (c !== null) acc.costUsd = (acc.costUsd ?? 0) + c;
+    merged.set(label, acc);
   }
   return [...merged]
-    .map(([model, totals]) => ({ model, totals }))
+    .map(([model, acc]) => ({ model, totals: acc.totals, costUsd: acc.costUsd }))
     .filter((s) => incomingTokens(s.totals) > 0 || s.totals.output > 0)
     .sort((a, b) => incomingTokens(b.totals) - incomingTokens(a.totals));
 }
@@ -298,11 +352,47 @@ export class TokenScanner {
       fetchedAt: new Date().toISOString(),
       session:
         id && session
-          ? { id, totals: session.totals, byModel: modelSlices(session.byModel) }
+          ? {
+              id,
+              totals: session.totals,
+              byModel: modelSlices(session.byModel),
+              costUsd: costOfModels(session.byModel),
+              context: this.contextFor(id),
+            }
           : null,
       total: total.totals,
       byModel: modelSlices(total.byModel),
+      totalCostUsd: costOfModels(total.byModel),
+      last30dCostUsd: this.last30dCost(),
     };
+  }
+
+  /** Newest context sample of the session, across every file that mentions it. */
+  private contextFor(sessionId: string): ContextGauge | null {
+    let best: ContextSample | null = null;
+    for (const state of this.files.values()) {
+      const ctx = state.lastCtx.get(sessionId);
+      if (ctx && (!best || ctx.ts > best.ts)) best = ctx;
+    }
+    if (!best) return null;
+    return { tokens: best.tokens, window: contextWindowTokens(best.model), model: best.model };
+  }
+
+  /** Priced spend of the last 30 calendar days across the project's live files. */
+  private last30dCost(): number | null {
+    const cutoff = Date.now() - 30 * 24 * 60 * 60_000;
+    let sum = 0;
+    let any = false;
+    for (const state of this.files.values()) {
+      for (const [key, usd] of state.days) {
+        if (!this.matchesCwd(key.slice(11))) continue;
+        const dayTs = Date.parse(key.slice(0, 10));
+        if (Number.isNaN(dayTs) || dayTs < cutoff) continue;
+        sum += usd;
+        any = true;
+      }
+    }
+    return any ? sum : null;
   }
 
   getState(): PersistedTokenState {
@@ -376,7 +466,7 @@ export class TokenScanner {
     }
     let state = this.files.get(file);
     if (!state) {
-      state = { offset: 0, buckets: new Map(), lastTs: new Map() };
+      state = { offset: 0, buckets: new Map(), lastTs: new Map(), lastCtx: new Map(), days: new Map() };
       this.files.set(file, state);
       // Rediscovered — its persisted copy must no longer look "vanished".
       this.known.delete(file);
@@ -386,6 +476,8 @@ export class TokenScanner {
       state.offset = 0;
       state.buckets.clear();
       state.lastTs.clear();
+      state.lastCtx.clear();
+      state.days.clear();
     }
     if (size === state.offset) return;
 
@@ -448,19 +540,43 @@ export class TokenScanner {
       bucket = { cwd, session, ...emptyModelTotals() };
       state.buckets.set(bucketKey, bucket);
     }
+    // Cache writes may carry a TTL split (5m is billed 1.25×, 1h is 2×).
+    const cacheDetail = (usage as Record<string, unknown>).cache_creation as
+      | Record<string, unknown>
+      | undefined;
     const spend: TokenTotals = {
       input: Number(usage.input_tokens ?? 0) || 0,
       output: Number(usage.output_tokens ?? 0) || 0,
       cacheCreate: Number(usage.cache_creation_input_tokens ?? 0) || 0,
       cacheRead: Number(usage.cache_read_input_tokens ?? 0) || 0,
+      cacheCreate1h: Number(cacheDetail?.ephemeral_1h_input_tokens ?? 0) || 0,
     };
+    const model = typeof message?.model === 'string' ? message.model : '';
     addTotals(bucket.totals, spend);
-    addModel(bucket, typeof message?.model === 'string' ? message.model : '', spend);
+    addModel(bucket, model, spend);
 
-    if (session) {
-      const ts = Date.parse(String(entry.timestamp ?? ''));
-      if (!Number.isNaN(ts) && ts > (state.lastTs.get(session) ?? 0)) {
-        state.lastTs.set(session, ts);
+    const ts = Date.parse(String(entry.timestamp ?? ''));
+    if (session && !Number.isNaN(ts) && ts > (state.lastTs.get(session) ?? 0)) {
+      state.lastTs.set(session, ts);
+    }
+
+    // The $ spent this entry, attributed to the calendar day it happened.
+    if (!Number.isNaN(ts)) {
+      const c = costUsd(model, spend);
+      if (c !== null && c > 0) {
+        const day = new Date(ts).toISOString().slice(0, 10);
+        const dayKey = `${day} ${cwd}`;
+        state.days.set(dayKey, (state.days.get(dayKey) ?? 0) + c);
+      }
+    }
+
+    // Context gauge: one request's prompt size ≈ how full the window is.
+    // Sidechains (subagents) run their own context — only the main chain counts.
+    const incoming = spend.input + spend.cacheCreate + spend.cacheRead;
+    if (session && entry.isSidechain !== true && !Number.isNaN(ts) && incoming > 0) {
+      const prev = state.lastCtx.get(session);
+      if (!prev || ts >= prev.ts) {
+        state.lastCtx.set(session, { ts, tokens: incoming, model });
       }
     }
   }
