@@ -118,6 +118,8 @@ var MESSAGES = {
     tokensPrompt: "prompt",
     tokensCacheWrite: "cache write",
     tokensCacheRead: "cache read",
+    tokensByModel: "by model",
+    tokensModelUnknown: "model not recorded",
     labelTimeline: "Timeline",
     labelPlanUsage: "Plan usage",
     labelActivityLog: "Activity Log",
@@ -194,6 +196,8 @@ var MESSAGES = {
     tokensPrompt: "запрос",
     tokensCacheWrite: "запись кэша",
     tokensCacheRead: "чтение кэша",
+    tokensByModel: "по моделям",
+    tokensModelUnknown: "модель не записана",
     labelTimeline: "Таймлайн",
     labelPlanUsage: "Лимиты плана",
     labelActivityLog: "Журнал активности",
@@ -1256,7 +1260,7 @@ function groupDigits(n) {
  * traffic: the plain input number alone is a few thousand against millions of
  * cache reads, which reads as a bug rather than as a cheap prompt.
  */
-function fillTokenCells(inId, outId, totals, scopeTitle) {
+function fillTokenCells(inId, outId, totals, scopeTitle, byModel) {
   var inEl = document.getElementById(inId);
   var outEl = document.getElementById(outId);
   if (!inEl || !outEl) return;
@@ -1274,8 +1278,31 @@ function fillTokenCells(inId, outId, totals, scopeTitle) {
     scopeTitle + "\n" + tr("tokensIn") + ": " + groupDigits(incoming) +
     "\n  " + tr("tokensPrompt") + ": " + groupDigits(totals.input) +
     "\n  " + tr("tokensCacheWrite") + ": " + groupDigits(totals.cacheCreate) +
-    "\n  " + tr("tokensCacheRead") + ": " + groupDigits(totals.cacheRead);
-  outEl.title = scopeTitle + "\n" + tr("tokensOut") + ": " + groupDigits(totals.output);
+    "\n  " + tr("tokensCacheRead") + ": " + groupDigits(totals.cacheRead) +
+    modelBreakdown(byModel, function (t) {
+      return (t.input || 0) + (t.cacheCreate || 0) + (t.cacheRead || 0);
+    });
+  outEl.title =
+    scopeTitle + "\n" + tr("tokensOut") + ": " + groupDigits(totals.output) +
+    modelBreakdown(byModel, function (t) { return t.output || 0; });
+}
+
+/**
+ * The "by model" tail of a tooltip, ordered by the metric being shown so the
+ * biggest spender is on top of both the incoming and the outgoing list.
+ */
+function modelBreakdown(byModel, metric) {
+  if (!byModel || !byModel.length) return "";
+  var rows = byModel
+    .map(function (slice) {
+      return { name: slice.model || tr("tokensModelUnknown"), value: metric(slice.totals || {}) };
+    })
+    .filter(function (row) { return row.value > 0; })
+    .sort(function (a, b) { return b.value - a.value; });
+  if (!rows.length) return "";
+  return "\n" + tr("tokensByModel") + ":" + rows.map(function (row) {
+    return "\n  " + row.name + ": " + groupDigits(row.value);
+  }).join("");
 }
 
 function renderTokens(tokens) {
@@ -1290,8 +1317,14 @@ function renderTokens(tokens) {
     "tok-session-in", "tok-session-out",
     tokens.session ? tokens.session.totals : null,
     tr("tokensSessionTitle"),
+    tokens.session ? tokens.session.byModel : null,
   );
-  fillTokenCells("tok-total-in", "tok-total-out", tokens.total, tr("tokensTotalTitle"));
+  fillTokenCells(
+    "tok-total-in", "tok-total-out",
+    tokens.total,
+    tr("tokensTotalTitle"),
+    tokens.byModel,
+  );
 }
 
 function renderUsage() {

@@ -19,7 +19,7 @@ When you orchestrate several subagents in parallel, you lose track of who is doi
 - **A timeline** (Canvas) — who ran when, with a configurable window (5 min — 6 hours).
 - **An activity log** — the last 50 start/stop/waiting/stop-toggle events.
 - **Plan usage** — real subscription limits: the 5-hour session window and weekly limits, with percentages, reset times, a burn-pace indicator ("running hot / on pace / room to spare") with an even-pace tick on each bar, a forecast like "hits 100% in ~2h at the current pace", and quota degradation alerts. Same API as `/usage` in Claude Code; Kimi Code limits come from the Kimi Code API.
-- **Token counters** — incoming (prompt + cache write + cache read) and outgoing tokens for the current CLI session and for the project as a whole, read straight from the local transcripts (`~/.claude/projects/`) — no subprocess, no network. The project total spans every session ever recorded there and survives transcript pruning.
+- **Token counters** — incoming (prompt + cache write + cache read) and outgoing tokens for the current CLI session and for the project as a whole, read straight from the local transcripts (`~/.claude/projects/`) — no subprocess, no network. The project total spans every session ever recorded there and survives transcript pruning. Hovering a counter breaks it down by kind (prompt / cache write / cache read) and by model — Opus, Sonnet, the Haiku behind background tasks, or whatever else the CLI logged.
 - **Per-window isolation** — each VSCode window only sees its own sessions (filtered by workspace `cwd`).
 - **Localization** — en/ru UI, language taken from the OS (configurable).
 

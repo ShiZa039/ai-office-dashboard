@@ -3,12 +3,34 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import {
+  ModelSlice,
   PersistedTokenState,
   TokenScanner,
   emptyTotals,
   incomingTokens,
+  modelLabel,
   projectDirSlug,
 } from '../src/tokenUsage';
+
+// --- modelLabel ---
+
+assert.strictEqual(modelLabel('claude-opus-4-5-20251101'), 'Opus 4.5', 'release date is not a version');
+assert.strictEqual(modelLabel('claude-sonnet-4-5-20250929'), 'Sonnet 4.5', 'same for sonnet');
+assert.strictEqual(modelLabel('claude-3-5-haiku-20241022'), 'Haiku 3.5', 'old ids put the version first');
+assert.strictEqual(modelLabel('claude-opus-5'), 'Opus 5', 'a bare id needs no trimming');
+assert.strictEqual(modelLabel('claude-opus-5[1m]'), 'Opus 5', 'a context-window suffix is the same model');
+assert.strictEqual(modelLabel('kimi-k2-turbo-preview'), 'kimi-k2-turbo-preview', 'non-Claude ids are left alone');
+assert.strictEqual(modelLabel(''), '', 'an unrecorded model stays empty for the UI to name');
+
+/** byModel is display-ordered; tests want it addressable. */
+function slice(slices: ModelSlice[], model: string): ModelSlice | undefined {
+  return slices.find((s) => s.model === model);
+}
+
+/** How the scanner stores a cwd, for hand-written persisted states. */
+function normalized(p: string): string {
+  return p.replace(/\\/g, '/').toLowerCase();
+}
 
 // --- projectDirSlug ---
 
@@ -104,6 +126,16 @@ async function main(): Promise<void> {
   );
   assert.strictEqual(snap.session?.id, 'aaaa-1111', 'requested session found');
   assert.strictEqual(incomingTokens(snap.total), 735, 'incoming = prompt + both caches');
+  assert.deepStrictEqual(
+    snap.byModel.map((s) => s.model),
+    ['Opus 5'],
+    'a single-model project reports one slice',
+  );
+  assert.deepStrictEqual(
+    slice(snap.byModel, 'Opus 5')?.totals,
+    snap.total,
+    'the only slice carries the whole total',
+  );
 
   // --- the same message written twice is counted once ---
 
@@ -151,12 +183,35 @@ async function main(): Promise<void> {
 
   write(
     sessionB,
-    entry({ session: 'bbbb-2222', id: 'n1', output: 40, cacheRead: 60 }),
+    entry({ session: 'bbbb-2222', id: 'n1', output: 40, cacheRead: 60, model: 'claude-3-5-haiku-20241022' }),
   );
   await scanner.scan();
   snap = scanner.snapshot('bbbb-2222');
   assert.strictEqual(snap.session?.totals.output, 40, 'session slice excludes other sessions');
   assert.strictEqual(snap.total.output, 200, 'project total spans every session');
+
+  // --- the split follows the same scoping as the sums ---
+
+  assert.deepStrictEqual(
+    snap.session?.byModel.map((s) => s.model),
+    ['Haiku 3.5'],
+    'a session lists only the models it used',
+  );
+  assert.deepStrictEqual(
+    snap.byModel.map((s) => s.model),
+    // The hand-written m4 entry above carries no model field — it lands in the
+    // "unknown" slice, which the UI names rather than dropping.
+    ['Opus 5', 'Haiku 3.5', ''],
+    'the project split is ordered by incoming spend',
+  );
+  assert.strictEqual(slice(snap.byModel, 'Haiku 3.5')?.totals.output, 40, "haiku's own outgoing");
+  assert.strictEqual(slice(snap.byModel, 'Opus 5')?.totals.output, 157, 'opus keeps the rest');
+  assert.strictEqual(slice(snap.byModel, '')?.totals.output, 3, 'an entry with no model is still counted');
+  assert.strictEqual(
+    snap.byModel.reduce((sum, s) => sum + s.totals.output, 0),
+    snap.total.output,
+    'the slices add up to the total',
+  );
   assert.strictEqual(
     scanner.snapshot(null).session?.id,
     'bbbb-2222',
@@ -196,25 +251,32 @@ async function main(): Promise<void> {
     200,
     'a retired transcript is not retired a second time',
   );
+  assert.strictEqual(
+    slice(revived.snapshot(null).byModel, 'Haiku 3.5')?.totals.output,
+    40,
+    'a retired transcript keeps its model split, not just its sum',
+  );
 
   // --- another project's persisted files survive a scan that never saw them ---
   // (workspaceState can carry entries written while a different folder was open)
 
   const foreignFile = path.join(otherDir, 'cccc-3333.jsonl');
-  const shared = {
-    version: 1,
+  const foreignTotals = { input: 0, output: 999, cacheCreate: 0, cacheRead: 999 };
+  const shared: PersistedTokenState = {
+    version: 2,
     retired: revived.getState().retired,
     files: {
       ...revived.getState().files,
       [foreignFile]: [
         {
-          cwd: otherCwd.replace(/\\/g, '/').toLowerCase(),
+          cwd: normalized(otherCwd),
           session: 'cccc-3333',
-          totals: { input: 0, output: 999, cacheCreate: 0, cacheRead: 999 },
+          totals: foreignTotals,
+          byModel: { 'claude-opus-5': foreignTotals },
         },
       ],
     },
-  } as PersistedTokenState;
+  };
 
   const scoped = new TokenScanner(root, shared);
   scoped.setCwdFilter([cwd]);
@@ -235,6 +297,37 @@ async function main(): Promise<void> {
   await revived.scan();
   const after = revived.snapshot(null).total.output;
   assert.strictEqual(after, 43, 'shrunken file rescanned from zero (3 fresh + 40 retired)');
+
+  // --- a v1 state (written before models were tracked) still counts ---
+
+  // A project of its own, so the numbers under test are the only ones in scope.
+  const legacyCwd = path.join(tmp, 'work', 'legacy');
+  const legacyDir = path.join(root, projectDirSlug(legacyCwd));
+  fs.mkdirSync(legacyDir, { recursive: true });
+  const legacy = {
+    version: 1,
+    retired: { [normalized(legacyCwd)]: { input: 1, output: 11, cacheCreate: 0, cacheRead: 5 } },
+    files: {
+      [path.join(legacyDir, 'dddd-4444.jsonl')]: [
+        {
+          cwd: normalized(legacyCwd),
+          session: 'dddd-4444',
+          totals: { input: 2, output: 22, cacheCreate: 0, cacheRead: 7 },
+        },
+      ],
+    },
+  } as unknown as PersistedTokenState;
+
+  const migrated = new TokenScanner(root, legacy);
+  migrated.setCwdFilter([legacyCwd]);
+  await migrated.scan(); // the v1 file is gone from disk, so it retires now
+  const migratedSnap = migrated.snapshot(null);
+  assert.strictEqual(migratedSnap.total.output, 33, 'v1 sums survive the upgrade');
+  assert.strictEqual(
+    slice(migratedSnap.byModel, '')?.totals.output,
+    33,
+    'tokens counted before the split land under "model unknown"',
+  );
 
   // --- an unusable persisted state is ignored rather than fatal ---
 

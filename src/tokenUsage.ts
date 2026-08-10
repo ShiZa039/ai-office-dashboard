@@ -14,6 +14,9 @@
  *     are eventually pruned by Claude Code, so totals of files that vanish are
  *     retired into a persisted bucket instead of silently dropping off.
  *
+ * Each of the two is also split by model, since the same session routinely
+ * mixes Opus with the Haiku behind background tasks.
+ *
  * No vscode imports — unit-testable.
  */
 import * as fs from 'fs';
@@ -27,10 +30,28 @@ export interface TokenTotals {
   cacheRead: number;
 }
 
+/**
+ * A sum plus the same sum split by the model that spent it. Keys are the raw
+ * ids carried by the transcript (`claude-opus-4-5-20251101`, `kimi-k2-…`);
+ * they are folded into display names only when a snapshot is taken. `''` is
+ * "model unknown" — entries with no model field, and everything counted before
+ * the split existed.
+ */
+export interface ModelTotals {
+  totals: TokenTotals;
+  byModel: Record<string, TokenTotals>;
+}
+
 /** One (cwd, session) slice of a transcript file. */
-interface Bucket {
+interface Bucket extends ModelTotals {
   cwd: string;
   session: string;
+}
+
+/** One model's share of a scope, ready to render. */
+export interface ModelSlice {
+  /** Display name, e.g. "Opus 4.5"; `''` when the model was not recorded. */
+  model: string;
   totals: TokenTotals;
 }
 
@@ -44,18 +65,27 @@ interface FileState {
 
 /** Shape persisted between windows/restarts (VSCode workspaceState). */
 export interface PersistedTokenState {
-  version: 1;
+  version: 2;
   /** cwd → tokens of transcripts that are gone from disk. */
-  retired: Record<string, TokenTotals>;
+  retired: Record<string, ModelTotals>;
   /** file path → its buckets, so a vanished file can be retired exactly once. */
   files: Record<string, Bucket[]>;
+}
+
+/** v1 knew no models; its buckets and retired sums are plain `TokenTotals`. */
+interface PersistedTokenStateV1 {
+  version: 1;
+  retired: Record<string, TokenTotals>;
+  files: Record<string, { cwd: string; session: string; totals: TokenTotals }[]>;
 }
 
 export interface TokenSnapshot {
   fetchedAt: string;
   /** null until a session of this project is known. */
-  session: { id: string; totals: TokenTotals } | null;
+  session: { id: string; totals: TokenTotals; byModel: ModelSlice[] } | null;
   total: TokenTotals;
+  /** Project-wide split, biggest spender first. */
+  byModel: ModelSlice[];
 }
 
 export function emptyTotals(): TokenTotals {
@@ -73,6 +103,83 @@ export function addTotals(target: TokenTotals, add: TokenTotals): TokenTotals {
 /** Everything that was fed to the model: prompt + both kinds of cache traffic. */
 export function incomingTokens(t: TokenTotals): number {
   return t.input + t.cacheCreate + t.cacheRead;
+}
+
+function emptyModelTotals(): ModelTotals {
+  return { totals: emptyTotals(), byModel: {} };
+}
+
+/** Persisted sum → live one, accepting both the v1 (flat) and v2 shapes. */
+function reviveModelTotals(entry: Partial<ModelTotals> & Partial<TokenTotals>): ModelTotals {
+  const flat = !entry.totals;
+  const totals = { ...emptyTotals(), ...((flat ? entry : entry.totals) as TokenTotals) };
+  const byModel: Record<string, TokenTotals> = {};
+  for (const [model, slice] of Object.entries(entry.byModel ?? {})) {
+    byModel[model] = { ...emptyTotals(), ...slice };
+  }
+  // A v1 entry has a sum but no split; keeping it whole under "unknown" is what
+  // makes the slices of a migrated state still add up to the total.
+  if (!Object.keys(byModel).length) byModel[''] = { ...totals };
+  return { totals, byModel };
+}
+
+/** Fold `add` into `target`, model split included. */
+function addModelTotals(target: ModelTotals, add: ModelTotals): ModelTotals {
+  addTotals(target.totals, add.totals);
+  for (const [model, totals] of Object.entries(add.byModel)) {
+    addModel(target, model, totals);
+  }
+  return target;
+}
+
+/** Add one model's spend to a scope (the scope's own sum stays untouched). */
+function addModel(target: ModelTotals, model: string, add: TokenTotals): void {
+  const slice = target.byModel[model] ?? emptyTotals();
+  target.byModel[model] = addTotals(slice, add);
+}
+
+const MODEL_FAMILIES = ['opus', 'sonnet', 'haiku', 'fable'];
+
+/**
+ * Transcript model id → what a human calls it: `claude-opus-4-5-20251101` and
+ * `claude-3-5-haiku-20241022` both become "<Family> <version>". Anything that
+ * is not a Claude id (Kimi and friends) is left exactly as it came, since we
+ * have no naming rule we can trust for it.
+ */
+export function modelLabel(raw: string): string {
+  if (!raw) return '';
+  // Context-window suffixes like "claude-opus-5[1m]" are the same model.
+  const parts = raw.toLowerCase().replace(/\[.*$/, '').split('-');
+  const family = parts.findIndex((p) => MODEL_FAMILIES.includes(p));
+  if (parts[0] !== 'claude' || family === -1) return raw;
+  // Version digits sit either after the family ("opus-4-5") or before it
+  // ("3-5-haiku"); a trailing release date is not a version.
+  const digits = (from: number, to: number): string[] => {
+    const out: string[] = [];
+    for (const p of parts.slice(from, to)) {
+      if (!/^\d{1,2}$/.test(p)) break;
+      out.push(p);
+    }
+    return out;
+  };
+  const after = digits(family + 1, parts.length);
+  const version = after.length ? after : digits(1, family);
+  const name = parts[family][0].toUpperCase() + parts[family].slice(1);
+  return version.length ? `${name} ${version.join('.')}` : name;
+}
+
+/** Raw-id buckets → display slices, biggest incoming spend first. */
+function modelSlices(byModel: Record<string, TokenTotals>): ModelSlice[] {
+  const merged = new Map<string, TokenTotals>();
+  for (const [raw, totals] of Object.entries(byModel)) {
+    const label = modelLabel(raw);
+    const acc = merged.get(label) ?? emptyTotals();
+    merged.set(label, addTotals(acc, totals));
+  }
+  return [...merged]
+    .map(([model, totals]) => ({ model, totals }))
+    .filter((s) => incomingTokens(s.totals) > 0 || s.totals.output > 0)
+    .sort((a, b) => incomingTokens(b.totals) - incomingTokens(a.totals));
 }
 
 function normalizeCwd(p: string | undefined | null): string {
@@ -102,7 +209,7 @@ export class TokenScanner {
    * all would roughly double every number.
    */
   private keys = new Set<string>();
-  private retired = new Map<string, TokenTotals>();
+  private retired = new Map<string, ModelTotals>();
   /** Files known to a previous process; drained as this pass rediscovers them. */
   private known = new Map<string, Bucket[]>();
   private cwdFilters: string[] | null = null;
@@ -110,14 +217,19 @@ export class TokenScanner {
 
   constructor(
     private root: string,
-    state?: PersistedTokenState,
+    state?: PersistedTokenState | PersistedTokenStateV1,
   ) {
-    if (state && state.version === 1) {
-      for (const [cwd, totals] of Object.entries(state.retired ?? {})) {
-        this.retired.set(cwd, { ...emptyTotals(), ...totals });
+    // A v1 state predates the per-model split: its numbers are still exact,
+    // they just all land under "model unknown".
+    if (state && (state.version === 1 || state.version === 2)) {
+      for (const [cwd, entry] of Object.entries(state.retired ?? {})) {
+        this.retired.set(cwd, reviveModelTotals(entry));
       }
       for (const [file, buckets] of Object.entries(state.files ?? {})) {
-        this.known.set(file, buckets);
+        this.known.set(
+          file,
+          buckets.map((b) => ({ cwd: b.cwd, session: b.session, ...reviveModelTotals(b) })),
+        );
       }
     }
   }
@@ -160,36 +272,41 @@ export class TokenScanner {
    * project) the most recently active session of this project is used.
    */
   snapshot(sessionId: string | null): TokenSnapshot {
-    const total = emptyTotals();
-    const perSession = new Map<string, TokenTotals>();
+    const total = emptyModelTotals();
+    const perSession = new Map<string, ModelTotals>();
     let newest: { id: string; ts: number } | null = null;
 
     for (const state of this.files.values()) {
       for (const bucket of state.buckets.values()) {
         if (!this.matchesCwd(bucket.cwd)) continue;
-        addTotals(total, bucket.totals);
+        addModelTotals(total, bucket);
         if (!bucket.session) continue;
-        const acc = perSession.get(bucket.session) ?? emptyTotals();
-        addTotals(acc, bucket.totals);
+        const acc = perSession.get(bucket.session) ?? emptyModelTotals();
+        addModelTotals(acc, bucket);
         perSession.set(bucket.session, acc);
         const ts = state.lastTs.get(bucket.session) ?? 0;
         if (!newest || ts > newest.ts) newest = { id: bucket.session, ts };
       }
     }
-    for (const [cwd, totals] of this.retired) {
-      if (this.matchesCwd(cwd)) addTotals(total, totals);
+    for (const [cwd, retired] of this.retired) {
+      if (this.matchesCwd(cwd)) addModelTotals(total, retired);
     }
 
     const id = sessionId && perSession.has(sessionId) ? sessionId : (newest?.id ?? null);
+    const session = id ? (perSession.get(id) ?? emptyModelTotals()) : null;
     return {
       fetchedAt: new Date().toISOString(),
-      session: id ? { id, totals: perSession.get(id) ?? emptyTotals() } : null,
-      total,
+      session:
+        id && session
+          ? { id, totals: session.totals, byModel: modelSlices(session.byModel) }
+          : null,
+      total: total.totals,
+      byModel: modelSlices(total.byModel),
     };
   }
 
   getState(): PersistedTokenState {
-    const retired: Record<string, TokenTotals> = {};
+    const retired: Record<string, ModelTotals> = {};
     for (const [cwd, totals] of this.retired) retired[cwd] = totals;
     const files: Record<string, Bucket[]> = {};
     for (const [file, state] of this.files) files[file] = [...state.buckets.values()];
@@ -198,7 +315,7 @@ export class TokenScanner {
     for (const [file, buckets] of this.known) {
       if (!files[file]) files[file] = buckets;
     }
-    return { version: 1, retired, files };
+    return { version: 2, retired, files };
   }
 
   /** Transcript files under project dirs that could belong to this workspace. */
@@ -242,8 +359,8 @@ export class TokenScanner {
     for (const [file, buckets] of [...this.known]) {
       if (present.has(file) || !dirs.has(path.dirname(file))) continue;
       for (const bucket of buckets) {
-        const acc = this.retired.get(bucket.cwd) ?? emptyTotals();
-        addTotals(acc, bucket.totals);
+        const acc = this.retired.get(bucket.cwd) ?? emptyModelTotals();
+        addModelTotals(acc, bucket);
         this.retired.set(bucket.cwd, acc);
       }
       this.known.delete(file);
@@ -328,13 +445,17 @@ export class TokenScanner {
     const bucketKey = `${cwd}\u0000${session}`;
     let bucket = state.buckets.get(bucketKey);
     if (!bucket) {
-      bucket = { cwd, session, totals: emptyTotals() };
+      bucket = { cwd, session, ...emptyModelTotals() };
       state.buckets.set(bucketKey, bucket);
     }
-    bucket.totals.input += Number(usage.input_tokens ?? 0) || 0;
-    bucket.totals.output += Number(usage.output_tokens ?? 0) || 0;
-    bucket.totals.cacheCreate += Number(usage.cache_creation_input_tokens ?? 0) || 0;
-    bucket.totals.cacheRead += Number(usage.cache_read_input_tokens ?? 0) || 0;
+    const spend: TokenTotals = {
+      input: Number(usage.input_tokens ?? 0) || 0,
+      output: Number(usage.output_tokens ?? 0) || 0,
+      cacheCreate: Number(usage.cache_creation_input_tokens ?? 0) || 0,
+      cacheRead: Number(usage.cache_read_input_tokens ?? 0) || 0,
+    };
+    addTotals(bucket.totals, spend);
+    addModel(bucket, typeof message?.model === 'string' ? message.model : '', spend);
 
     if (session) {
       const ts = Date.parse(String(entry.timestamp ?? ''));
