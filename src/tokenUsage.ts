@@ -49,8 +49,19 @@ export interface ModelTotals {
   byModel: Record<string, TokenTotals>;
 }
 
+/**
+ * A sum split by model and, independently, by the agent that spent it. Agent
+ * keys are the `attributionAgent` the transcript carries ("Explore",
+ * "general-purpose", custom roster names); `''` is the main chain — and, for
+ * totals migrated from pre-v3 state, "agent unknown", since the split did not
+ * exist yet.
+ */
+export interface AgentModelTotals extends ModelTotals {
+  byAgent: Record<string, ModelTotals>;
+}
+
 /** One (cwd, session) slice of a transcript file. */
-interface Bucket extends ModelTotals {
+interface Bucket extends AgentModelTotals {
   cwd: string;
   session: string;
 }
@@ -62,6 +73,15 @@ export interface ModelSlice {
   totals: TokenTotals;
   /** API-list-price cost of this slice; null when the model is unpriced. */
   costUsd?: number | null;
+}
+
+/** One agent's share of a scope, with its own per-model split. */
+export interface AgentSlice {
+  /** Agent type as spawned ("Explore", …); `''` = the main chain. */
+  agent: string;
+  totals: TokenTotals;
+  costUsd: number | null;
+  byModel: ModelSlice[];
 }
 
 /** Size of one request's prompt — proxy for "how full is the context". */
@@ -89,11 +109,18 @@ interface FileState {
 
 /** Shape persisted between windows/restarts (VSCode workspaceState). */
 export interface PersistedTokenState {
-  version: 2;
+  version: 3;
   /** cwd → tokens of transcripts that are gone from disk. */
-  retired: Record<string, ModelTotals>;
+  retired: Record<string, AgentModelTotals>;
   /** file path → its buckets, so a vanished file can be retired exactly once. */
   files: Record<string, Bucket[]>;
+}
+
+/** v2 knew models but not agents. */
+export interface PersistedTokenStateV2 {
+  version: 2;
+  retired: Record<string, ModelTotals>;
+  files: Record<string, (ModelTotals & { cwd: string; session: string })[]>;
 }
 
 /** v1 knew no models; its buckets and retired sums are plain `TokenTotals`. */
@@ -120,6 +147,7 @@ export interface TokenSnapshot {
     id: string;
     totals: TokenTotals;
     byModel: ModelSlice[];
+    byAgent: AgentSlice[];
     /** API-list-price cost of the session; null when nothing was priceable. */
     costUsd: number | null;
     context: ContextGauge | null;
@@ -127,6 +155,8 @@ export interface TokenSnapshot {
   total: TokenTotals;
   /** Project-wide split, biggest spender first. */
   byModel: ModelSlice[];
+  /** Project-wide split by agent, biggest spender first. */
+  byAgent: AgentSlice[];
   /** API-list-price cost of the whole project (retired transcripts included). */
   totalCostUsd: number | null;
   /**
@@ -177,6 +207,36 @@ function addModelTotals(target: ModelTotals, add: ModelTotals): ModelTotals {
   addTotals(target.totals, add.totals);
   for (const [model, totals] of Object.entries(add.byModel)) {
     addModel(target, model, totals);
+  }
+  return target;
+}
+
+function emptyAgentModelTotals(): AgentModelTotals {
+  return { ...emptyModelTotals(), byAgent: {} };
+}
+
+/**
+ * Persisted sum → live one, agent split included. A pre-v3 entry has no
+ * split; keeping it whole under the `''` agent is what makes the agent slices
+ * of a migrated state still add up to the total.
+ */
+function reviveAgentModelTotals(
+  entry: Partial<AgentModelTotals> & Partial<TokenTotals>,
+): AgentModelTotals {
+  const byAgent: Record<string, ModelTotals> = {};
+  for (const [agent, slice] of Object.entries(entry.byAgent ?? {})) {
+    byAgent[agent] = reviveModelTotals(slice);
+  }
+  if (!Object.keys(byAgent).length) byAgent[''] = reviveModelTotals(entry);
+  return { ...reviveModelTotals(entry), byAgent };
+}
+
+/** Fold `add` into `target`, both splits included. */
+function addAgentModelTotals(target: AgentModelTotals, add: AgentModelTotals): AgentModelTotals {
+  addModelTotals(target, add);
+  for (const [agent, totals] of Object.entries(add.byAgent)) {
+    const slice = target.byAgent[agent] ?? emptyModelTotals();
+    target.byAgent[agent] = addModelTotals(slice, totals);
   }
   return target;
 }
@@ -236,6 +296,19 @@ function modelSlices(byModel: Record<string, TokenTotals>): ModelSlice[] {
     .sort((a, b) => incomingTokens(b.totals) - incomingTokens(a.totals));
 }
 
+/** Agent buckets → display slices, biggest incoming spend first. */
+function agentSlices(byAgent: Record<string, ModelTotals>): AgentSlice[] {
+  return Object.entries(byAgent)
+    .map(([agent, mt]) => ({
+      agent,
+      totals: mt.totals,
+      costUsd: costOfModels(mt.byModel),
+      byModel: modelSlices(mt.byModel),
+    }))
+    .filter((s) => incomingTokens(s.totals) > 0 || s.totals.output > 0)
+    .sort((a, b) => incomingTokens(b.totals) - incomingTokens(a.totals));
+}
+
 function normalizeCwd(p: string | undefined | null): string {
   if (!p) return '';
   return p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
@@ -263,7 +336,7 @@ export class TokenScanner {
    * all would roughly double every number.
    */
   private keys = new Set<string>();
-  private retired = new Map<string, ModelTotals>();
+  private retired = new Map<string, AgentModelTotals>();
   /** Files known to a previous process; drained as this pass rediscovers them. */
   private known = new Map<string, Bucket[]>();
   private cwdFilters: string[] | null = null;
@@ -271,18 +344,18 @@ export class TokenScanner {
 
   constructor(
     private root: string,
-    state?: PersistedTokenState | PersistedTokenStateV1,
+    state?: PersistedTokenState | PersistedTokenStateV2 | PersistedTokenStateV1,
   ) {
-    // A v1 state predates the per-model split: its numbers are still exact,
-    // they just all land under "model unknown".
-    if (state && (state.version === 1 || state.version === 2)) {
+    // Pre-v3 states predate the model/agent splits: their numbers are still
+    // exact, they just land under "model unknown" / "agent unknown".
+    if (state && (state.version === 1 || state.version === 2 || state.version === 3)) {
       for (const [cwd, entry] of Object.entries(state.retired ?? {})) {
-        this.retired.set(cwd, reviveModelTotals(entry));
+        this.retired.set(cwd, reviveAgentModelTotals(entry));
       }
       for (const [file, buckets] of Object.entries(state.files ?? {})) {
         this.known.set(
           file,
-          buckets.map((b) => ({ cwd: b.cwd, session: b.session, ...reviveModelTotals(b) })),
+          buckets.map((b) => ({ cwd: b.cwd, session: b.session, ...reviveAgentModelTotals(b) })),
         );
       }
     }
@@ -326,28 +399,28 @@ export class TokenScanner {
    * project) the most recently active session of this project is used.
    */
   snapshot(sessionId: string | null): TokenSnapshot {
-    const total = emptyModelTotals();
-    const perSession = new Map<string, ModelTotals>();
+    const total = emptyAgentModelTotals();
+    const perSession = new Map<string, AgentModelTotals>();
     let newest: { id: string; ts: number } | null = null;
 
     for (const state of this.files.values()) {
       for (const bucket of state.buckets.values()) {
         if (!this.matchesCwd(bucket.cwd)) continue;
-        addModelTotals(total, bucket);
+        addAgentModelTotals(total, bucket);
         if (!bucket.session) continue;
-        const acc = perSession.get(bucket.session) ?? emptyModelTotals();
-        addModelTotals(acc, bucket);
+        const acc = perSession.get(bucket.session) ?? emptyAgentModelTotals();
+        addAgentModelTotals(acc, bucket);
         perSession.set(bucket.session, acc);
         const ts = state.lastTs.get(bucket.session) ?? 0;
         if (!newest || ts > newest.ts) newest = { id: bucket.session, ts };
       }
     }
     for (const [cwd, retired] of this.retired) {
-      if (this.matchesCwd(cwd)) addModelTotals(total, retired);
+      if (this.matchesCwd(cwd)) addAgentModelTotals(total, retired);
     }
 
     const id = sessionId && perSession.has(sessionId) ? sessionId : (newest?.id ?? null);
-    const session = id ? (perSession.get(id) ?? emptyModelTotals()) : null;
+    const session = id ? (perSession.get(id) ?? emptyAgentModelTotals()) : null;
     return {
       fetchedAt: new Date().toISOString(),
       session:
@@ -356,12 +429,14 @@ export class TokenScanner {
               id,
               totals: session.totals,
               byModel: modelSlices(session.byModel),
+              byAgent: agentSlices(session.byAgent),
               costUsd: costOfModels(session.byModel),
               context: this.contextFor(id),
             }
           : null,
       total: total.totals,
       byModel: modelSlices(total.byModel),
+      byAgent: agentSlices(total.byAgent),
       totalCostUsd: costOfModels(total.byModel),
       last30dCostUsd: this.last30dCost(),
     };
@@ -396,7 +471,7 @@ export class TokenScanner {
   }
 
   getState(): PersistedTokenState {
-    const retired: Record<string, ModelTotals> = {};
+    const retired: Record<string, AgentModelTotals> = {};
     for (const [cwd, totals] of this.retired) retired[cwd] = totals;
     const files: Record<string, Bucket[]> = {};
     for (const [file, state] of this.files) files[file] = [...state.buckets.values()];
@@ -405,7 +480,7 @@ export class TokenScanner {
     for (const [file, buckets] of this.known) {
       if (!files[file]) files[file] = buckets;
     }
-    return { version: 2, retired, files };
+    return { version: 3, retired, files };
   }
 
   /** Transcript files under project dirs that could belong to this workspace. */
@@ -428,8 +503,21 @@ export class TokenScanner {
       const dir = path.join(this.root, entry.name);
       dirs.add(dir);
       try {
-        for (const file of await fs.promises.readdir(dir)) {
-          if (file.toLowerCase().endsWith('.jsonl')) files.push(path.join(dir, file));
+        for (const item of await fs.promises.readdir(dir, { withFileTypes: true })) {
+          if (item.isFile() && item.name.toLowerCase().endsWith('.jsonl')) {
+            files.push(path.join(dir, item.name));
+          } else if (item.isDirectory()) {
+            // Subagent transcripts live in <session>/subagents/*.jsonl — their
+            // entries carry the parent sessionId, so they fold right in.
+            const sub = path.join(dir, item.name, 'subagents');
+            try {
+              for (const f of await fs.promises.readdir(sub)) {
+                if (f.toLowerCase().endsWith('.jsonl')) files.push(path.join(sub, f));
+              }
+            } catch {
+              // not a session dir (no subagents/) — nothing to read
+            }
+          }
         }
       } catch {
         // directory disappeared mid-scan — nothing to read
@@ -439,18 +527,35 @@ export class TokenScanner {
   }
 
   /**
+   * The `<root>/<slug>` project dir a transcript belongs to: its parent for a
+   * top-level session file, the great-grandparent for a file nested under
+   * `<session>/subagents/`.
+   */
+  private projectDirOf(file: string): string {
+    let dir = path.dirname(file);
+    let parent = path.dirname(dir);
+    while (parent !== this.root && parent !== dir) {
+      dir = parent;
+      parent = path.dirname(dir);
+    }
+    return dir;
+  }
+
+  /**
    * A transcript we tracked before but that is no longer on disk keeps its
-   * tokens: they were really spent. Only files under directories this pass
+   * tokens: they were really spent. Only files under project dirs this pass
    * actually looked at can be retired — everything else belongs to another
-   * project and is none of this window's business.
+   * project and is none of this window's business. (The project dir is what
+   * matters: a pruned session takes its whole `<session>/subagents/` tree
+   * with it, so the vanished file's own parent dir is gone too.)
    */
   private retireMissing(seen: string[], dirs: Set<string>): void {
     const present = new Set(seen);
     for (const [file, buckets] of [...this.known]) {
-      if (present.has(file) || !dirs.has(path.dirname(file))) continue;
+      if (present.has(file) || !dirs.has(this.projectDirOf(file))) continue;
       for (const bucket of buckets) {
-        const acc = this.retired.get(bucket.cwd) ?? emptyModelTotals();
-        addModelTotals(acc, bucket);
+        const acc = this.retired.get(bucket.cwd) ?? emptyAgentModelTotals();
+        addAgentModelTotals(acc, bucket);
         this.retired.set(bucket.cwd, acc);
       }
       this.known.delete(file);
@@ -537,7 +642,7 @@ export class TokenScanner {
     const bucketKey = `${cwd}\u0000${session}`;
     let bucket = state.buckets.get(bucketKey);
     if (!bucket) {
-      bucket = { cwd, session, ...emptyModelTotals() };
+      bucket = { cwd, session, ...emptyAgentModelTotals() };
       state.buckets.set(bucketKey, bucket);
     }
     // Cache writes may carry a TTL split (5m is billed 1.25×, 1h is 2×).
@@ -554,6 +659,14 @@ export class TokenScanner {
     const model = typeof message?.model === 'string' ? message.model : '';
     addTotals(bucket.totals, spend);
     addModel(bucket, model, spend);
+
+    // Which agent made the request: subagent entries carry their type in
+    // `attributionAgent`; the main chain has no such field and lands in `''`.
+    const agent = typeof entry.attributionAgent === 'string' ? entry.attributionAgent : '';
+    const agentAcc = bucket.byAgent[agent] ?? emptyModelTotals();
+    addTotals(agentAcc.totals, spend);
+    addModel(agentAcc, model, spend);
+    bucket.byAgent[agent] = agentAcc;
 
     const ts = Date.parse(String(entry.timestamp ?? ''));
     if (session && !Number.isNaN(ts) && ts > (state.lastTs.get(session) ?? 0)) {

@@ -5,6 +5,7 @@ import * as path from 'path';
 import {
   ModelSlice,
   PersistedTokenState,
+  PersistedTokenStateV2,
   TokenScanner,
   emptyTotals,
   incomingTokens,
@@ -71,6 +72,8 @@ interface EntryOpts {
   cache1h?: number;
   model?: string;
   sidechain?: boolean;
+  /** `attributionAgent` — how subagent entries name their agent type. */
+  agent?: string;
 }
 
 function entry(o: EntryOpts): string {
@@ -82,6 +85,7 @@ function entry(o: EntryOpts): string {
       sessionId: o.session,
       cwd: o.cwd ?? cwd,
       isSidechain: o.sidechain ?? false,
+      attributionAgent: o.agent,
       requestId: o.requestId ?? 'req-' + (o.id ?? 'x'),
       message: {
         id: o.id ?? 'msg-1',
@@ -311,7 +315,7 @@ async function main(): Promise<void> {
 
   const foreignFile = path.join(otherDir, 'cccc-3333.jsonl');
   const foreignTotals = { input: 0, output: 999, cacheCreate: 0, cacheRead: 999 };
-  const shared: PersistedTokenState = {
+  const shared: PersistedTokenStateV2 = {
     version: 2,
     retired: revived.getState().retired,
     files: {
@@ -347,6 +351,78 @@ async function main(): Promise<void> {
   const after = revived.snapshot(null).total.output;
   assert.strictEqual(after, 43, 'shrunken file rescanned from zero (3 fresh + 40 retired)');
 
+  // --- subagent transcripts (<session>/subagents/*.jsonl) are counted ---
+
+  const subCwd = path.join(tmp, 'work', 'subs');
+  const subDir = path.join(root, projectDirSlug(subCwd));
+  const subSession = 'eeee-5555';
+  const subagentsDir = path.join(subDir, subSession, 'subagents');
+  fs.mkdirSync(subagentsDir, { recursive: true });
+  write(
+    path.join(subDir, subSession + '.jsonl'),
+    entry({ session: subSession, cwd: subCwd, id: 'p1', input: 10, output: 100 }),
+  );
+  write(
+    path.join(subagentsDir, 'agent-abc.jsonl'),
+    entry({
+      session: subSession, cwd: subCwd, id: 'p2', output: 500, cacheRead: 1000,
+      model: 'claude-sonnet-5', sidechain: true, agent: 'Explore',
+    }),
+    entry({
+      session: subSession, cwd: subCwd, id: 'p3', output: 40, cacheRead: 10,
+      model: 'claude-haiku-4-5-20251001', sidechain: true, agent: 'Explore',
+    }),
+  );
+
+  const subScanner = new TokenScanner(root);
+  subScanner.setCwdFilter([subCwd]);
+  await subScanner.scan();
+  let subSnap = subScanner.snapshot(subSession);
+  assert.strictEqual(subSnap.total.output, 640, 'subagent transcripts are counted');
+  assert.strictEqual(
+    subSnap.session?.totals.output,
+    640,
+    'subagent spend lands in its parent session',
+  );
+  assert.strictEqual(
+    subSnap.session?.context?.tokens,
+    10,
+    'the context gauge still follows the main chain only',
+  );
+  assert.deepStrictEqual(
+    subSnap.session?.byAgent.map((a) => a.agent),
+    ['Explore', ''],
+    "agents ordered by incoming spend; '' is the main chain",
+  );
+  const explore = subSnap.session?.byAgent.find((a) => a.agent === 'Explore');
+  assert.strictEqual(explore?.totals.output, 540, "the subagent's own outgoing");
+  assert.deepStrictEqual(
+    explore?.byModel.map((m) => m.model),
+    ['Sonnet 5', 'Haiku 4.5'],
+    'each agent carries its own model split',
+  );
+  assert.ok((explore?.costUsd ?? 0) > 0, 'an agent slice of priced models is priced');
+  assert.strictEqual(
+    subSnap.byAgent.reduce((sum, a) => sum + a.totals.output, 0),
+    subSnap.total.output,
+    'the agent slices add up to the total',
+  );
+
+  // --- a pruned session dir retires its subagents, split intact ---
+
+  const subState = subScanner.getState();
+  fs.rmSync(path.join(subDir, subSession), { recursive: true });
+  const subRevived = new TokenScanner(root, subState);
+  subRevived.setCwdFilter([subCwd]);
+  await subRevived.scan();
+  subSnap = subRevived.snapshot(null);
+  assert.strictEqual(subSnap.total.output, 640, 'pruned subagent transcripts retire, not vanish');
+  assert.strictEqual(
+    subSnap.byAgent.find((a) => a.agent === 'Explore')?.totals.output,
+    540,
+    'the agent split survives retirement',
+  );
+
   // --- a v1 state (written before models were tracked) still counts ---
 
   // A project of its own, so the numbers under test are the only ones in scope.
@@ -377,6 +453,11 @@ async function main(): Promise<void> {
     33,
     'tokens counted before the split land under "model unknown"',
   );
+  assert.strictEqual(
+    migratedSnap.byAgent.find((a) => a.agent === '')?.totals.output,
+    33,
+    'pre-v3 tokens land under the main-chain agent slice',
+  );
 
   // --- an unusable persisted state is ignored rather than fatal ---
 
@@ -390,7 +471,9 @@ async function main(): Promise<void> {
 
   const global = new TokenScanner(root);
   await global.scan();
-  assert.strictEqual(global.snapshot(null).total.output, 1002, 'unfiltered scan spans all projects');
+  // 3 (sessionA) + 999 (other project) + 100 (the subagent project's main
+  // file — its session dir was pruned above, so only that file is on disk).
+  assert.strictEqual(global.snapshot(null).total.output, 1102, 'unfiltered scan spans all projects');
 
   assert.deepStrictEqual(
     emptyTotals(),

@@ -119,6 +119,8 @@ var MESSAGES = {
     tokensCacheWrite: "cache write",
     tokensCacheRead: "cache read",
     tokensByModel: "by model",
+    tokensByAgent: "by agent",
+    tokensAgentMain: "main agent",
     tokensModelUnknown: "model not recorded",
     tokensCostApprox: "What this would cost at API list prices (cache writes and reads included). Models without a known price are not counted.",
     tokensCostByModel: "cost by model",
@@ -208,6 +210,8 @@ var MESSAGES = {
     tokensCacheWrite: "запись кэша",
     tokensCacheRead: "чтение кэша",
     tokensByModel: "по моделям",
+    tokensByAgent: "по агентам",
+    tokensAgentMain: "основной агент",
     tokensModelUnknown: "модель не записана",
     tokensCostApprox: "Сколько это стоило бы по ценам API (запись и чтение кэша учтены). Модели без известной цены не считаются.",
     tokensCostByModel: "стоимость по моделям",
@@ -1282,7 +1286,7 @@ function groupDigits(n) {
  * traffic: the plain input number alone is a few thousand against millions of
  * cache reads, which reads as a bug rather than as a cheap prompt.
  */
-function fillTokenCells(inId, outId, totals, scopeTitle, byModel) {
+function fillTokenCells(inId, outId, totals, scopeTitle, byModel, byAgent) {
   var inEl = document.getElementById(inId);
   var outEl = document.getElementById(outId);
   if (!inEl || !outEl) return;
@@ -1293,7 +1297,11 @@ function fillTokenCells(inId, outId, totals, scopeTitle, byModel) {
     outEl.title = scopeTitle;
     return;
   }
-  var incoming = (totals.input || 0) + (totals.cacheCreate || 0) + (totals.cacheRead || 0);
+  var incomingOf = function (t) {
+    return (t.input || 0) + (t.cacheCreate || 0) + (t.cacheRead || 0);
+  };
+  var outputOf = function (t) { return t.output || 0; };
+  var incoming = incomingOf(totals);
   inEl.textContent = "↓ " + formatTokens(incoming);
   outEl.textContent = "↑ " + formatTokens(totals.output || 0);
   inEl.title =
@@ -1301,12 +1309,12 @@ function fillTokenCells(inId, outId, totals, scopeTitle, byModel) {
     "\n  " + tr("tokensPrompt") + ": " + groupDigits(totals.input) +
     "\n  " + tr("tokensCacheWrite") + ": " + groupDigits(totals.cacheCreate) +
     "\n  " + tr("tokensCacheRead") + ": " + groupDigits(totals.cacheRead) +
-    modelBreakdown(byModel, function (t) {
-      return (t.input || 0) + (t.cacheCreate || 0) + (t.cacheRead || 0);
-    });
+    modelBreakdown(byModel, incomingOf) +
+    agentBreakdown(byAgent, incomingOf);
   outEl.title =
     scopeTitle + "\n" + tr("tokensOut") + ": " + groupDigits(totals.output) +
-    modelBreakdown(byModel, function (t) { return t.output || 0; });
+    modelBreakdown(byModel, outputOf) +
+    agentBreakdown(byAgent, outputOf);
 }
 
 /**
@@ -1323,6 +1331,37 @@ function modelBreakdown(byModel, metric) {
     .sort(function (a, b) { return b.value - a.value; });
   if (!rows.length) return "";
   return "\n" + tr("tokensByModel") + ":" + rows.map(function (row) {
+    return "\n  " + row.name + ": " + groupDigits(row.value);
+  }).join("");
+}
+
+/**
+ * The "by agent" tail of a tooltip. Each agent is annotated with the models
+ * it ran on; when the whole scope is just the main chain there is nothing the
+ * section would add, so it is omitted.
+ */
+function agentBreakdown(byAgent, metric) {
+  if (!byAgent || !byAgent.length) return "";
+  var rows = byAgent
+    .map(function (slice) {
+      var models = (slice.byModel || [])
+        .map(function (m) {
+          return { name: m.model || tr("tokensModelUnknown"), value: metric(m.totals || {}) };
+        })
+        .filter(function (m) { return m.value > 0; })
+        .sort(function (a, b) { return b.value - a.value; })
+        .map(function (m) { return m.name; });
+      return {
+        main: !slice.agent,
+        name: (slice.agent || tr("tokensAgentMain")) +
+          (models.length ? " · " + models.join(", ") : ""),
+        value: metric(slice.totals || {}),
+      };
+    })
+    .filter(function (row) { return row.value > 0; })
+    .sort(function (a, b) { return b.value - a.value; });
+  if (!rows.length || (rows.length === 1 && rows[0].main)) return "";
+  return "\n" + tr("tokensByAgent") + ":" + rows.map(function (row) {
     return "\n  " + row.name + ": " + groupDigits(row.value);
   }).join("");
 }
@@ -1519,12 +1558,14 @@ function renderTokens(tokens) {
     tokens.session ? tokens.session.totals : null,
     tr("tokensSessionTitle"),
     tokens.session ? tokens.session.byModel : null,
+    tokens.session ? tokens.session.byAgent : null,
   );
   fillTokenCells(
     "tok-total-in", "tok-total-out",
     tokens.total,
     tr("tokensTotalTitle"),
     tokens.byModel,
+    tokens.byAgent,
   );
   fillCostCell(
     "tok-session-cost",

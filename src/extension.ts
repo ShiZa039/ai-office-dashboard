@@ -13,6 +13,7 @@ import {
   claudeUsageProvider,
 } from './subscriptionUsage';
 import { PaceStatus, nextAlertLevel } from './usagePace';
+import { AutoStopLatch } from './autoStop';
 import { PersistedTokenState, TokenScanner } from './tokenUsage';
 import { kimiUsageProvider } from './kimiUsage';
 import { discoverProjectAgents } from './agentRoster';
@@ -419,10 +420,60 @@ export function activate(context: vscode.ExtensionContext) {
       .getConfiguration('aiOffice')
       .get<boolean>('usage.degradationAlerts', true);
 
+  // ── Auto emergency stop ──
+  // When any plan limit reaches the threshold, the emergency stop fires by
+  // itself. Both settings are application-scoped (one machine-wide switch and
+  // threshold), but the stop itself covers the window's own project, exactly
+  // like the button — every window with the dashboard fires for its own cwds.
+  // A window with no folder (or scope=global) stops globally, since that is
+  // what its dashboard covers. Releasing works like for the manual stop.
+  const autoStopEnabled = () =>
+    vscode.workspace.getConfiguration('aiOffice').get<boolean>('autoStop.enabled', true);
+  const autoStopThresholdPct = () => {
+    const v = vscode.workspace
+      .getConfiguration('aiOffice')
+      .get<number>('autoStop.thresholdPercent', 95);
+    return Math.min(100, Math.max(50, v));
+  };
+  const autoStopLatch = new AutoStopLatch();
+
+  const maybeAutoStop = (snapshot: SubscriptionSnapshot, ru: boolean) => {
+    // The latch runs on every snapshot (even disabled/already stopped) so a
+    // stop the user released is not re-tripped by the very next poll.
+    const hit = autoStopLatch.check(snapshot, autoStopThresholdPct());
+    if (!hit || !autoStopEnabled() || stopActive) return;
+    const cwds = currentCwdFilter();
+    try {
+      activateStopEverywhere(cwds, new Date().toISOString());
+    } catch (err) {
+      log.appendLine(`AI Office: failed to write the auto-stop flag: ${String(err)}`);
+      return;
+    }
+    refreshStopState();
+    const global = !cwds || cwds.length === 0;
+    const name = `${snapshot.provider === 'kimi' ? 'Kimi Code' : 'Claude Code'} ${hit.label}`;
+    const pct = hit.utilization.toFixed(0);
+    log.appendLine(
+      `AI Office: auto-stop (${global ? 'global' : 'this project'}) — ${name} at ${pct}% (threshold ${autoStopThresholdPct()}%)`,
+    );
+    const scopeRu = global
+      ? 'во всех проектах (в окне нет папки или включён scope=global)'
+      : 'в этом проекте';
+    const scopeEn = global
+      ? 'in every project (this window has no folder, or scope=global is set)'
+      : 'in this project';
+    void vscode.window.showWarningMessage(
+      ru
+        ? `AI Office: АВТОСТОП — ${name} достиг ${pct}% (порог ${autoStopThresholdPct()}%). Вызовы инструментов ${scopeRu} заблокированы; кнопка остановки или новый промпт снимает блокировку.`
+        : `AI Office: AUTO-STOP — ${name} reached ${pct}% (threshold ${autoStopThresholdPct()}%). Tool calls ${scopeEn} are blocked; the stop button or a new prompt releases it.`,
+    );
+  };
+
   const handleQuotaUpdate = (snapshot: SubscriptionSnapshot) => {
     provider.updateSubscription(snapshot);
     if (snapshot.provider) lastQuotas[snapshot.provider] = snapshot;
     const ru = isRussianUi();
+    maybeAutoStop(snapshot, ru);
     const alerts = quotaAlertsEnabled();
     for (const lim of snapshot.limits) {
       const key = `${snapshot.provider}:${lim.kind}`;
