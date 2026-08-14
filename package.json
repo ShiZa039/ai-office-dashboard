@@ -2,7 +2,7 @@
   "name": "ai-office-dashboard",
   "displayName": "AI Office",
   "description": "%ext.description%",
-  "version": "0.20.0",
+  "version": "0.20.1",
   "publisher": "shiza039",
   "license": "MIT",
   "repository": {
@@ -238,12 +238,14 @@
     }
   },
   "scripts": {
+    "prepare": "node scripts/install-git-hooks.js",
+    "hooks:install": "node scripts/install-git-hooks.js",
     "vscode:prepublish": "npm run compile && npm run bundle",
     "compile": "tsc -p ./",
     "bundle": "esbuild src/extension.ts --bundle --outfile=out/src/extension.js --external:vscode --format=cjs --platform=node --target=node18 --minify",
     "watch": "tsc -watch -p ./",
-    "lint": "eslint src test hooks --ext ts,js",
-    "test": "tsc -p ./ && node out/test/eventParser.test.js && node out/test/types.test.js && node out/test/agentState.test.js && node out/test/agentDetail.test.js && node out/test/hookConfig.test.js && node out/test/hookConfigKimi.test.js && node out/test/subscriptionUsage.test.js && node out/test/kimiUsage.test.js && node out/test/agentRoster.test.js && node out/test/emitAgentEvent.test.js && node out/test/emitAgentEventPy.test.js && node out/test/stopFlag.test.js && node out/test/eventWatcher.test.js && node out/test/hookInstaller.test.js && node out/test/hookWiring.test.js && node out/test/usagePace.test.js && node out/test/autoStop.test.js && node out/test/tokenUsage.test.js && node out/test/pricing.test.js && node out/test/modelSelection.test.js"
+    "lint": "eslint src test hooks scripts --ext ts,js",
+    "test": "tsc -p ./ && node out/test/eventParser.test.js && node out/test/types.test.js && node out/test/agentState.test.js && node out/test/agentDetail.test.js && node out/test/hookConfig.test.js && node out/test/hookConfigKimi.test.js && node out/test/subscriptionUsage.test.js && node out/test/kimiUsage.test.js && node out/test/agentRoster.test.js && node out/test/emitAgentEvent.test.js && node out/test/emitAgentEventPy.test.js && node out/test/stopFlag.test.js && node out/test/eventWatcher.test.js && node out/test/hookInstaller.test.js && node out/test/hookWiring.test.js && node out/test/usagePace.test.js && node out/test/autoStop.test.js && node out/test/tokenUsage.test.js && node out/test/pricing.test.js && node out/test/modelSelection.test.js && node out/test/repoLink.test.js"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

@@ -32,6 +32,8 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
   constructor(
     private extensionUri: vscode.Uri,
     private version: string = '',
+    /** Pre-escaped repo/license tail of the footer line — see `repoLink.ts`. */
+    private footerMeta: string = '',
   ) {}
 
   /** Callback invoked when any webview signals it's ready */
@@ -274,6 +276,7 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
     // Resolved UI locale (e.g. "ru-RU") — the webview localizes its chrome from it.
     html = html.replace(/\{\{lang\}\}/g, uiLocale());
     html = html.replace(/\{\{version\}\}/g, this.version);
+    html = html.replace(/\{\{footerMeta\}\}/g, this.footerMeta);
 
     return html;
   }

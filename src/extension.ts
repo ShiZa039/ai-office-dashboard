@@ -16,6 +16,7 @@ import { PaceStatus, nextAlertLevel } from './usagePace';
 import { AutoStopLatch, fileLatchStore } from './autoStop';
 import { PersistedTokenState, TokenScanner } from './tokenUsage';
 import { readModelSelection } from './modelSelection';
+import { footerMetaHtml } from './repoLink';
 import { kimiUsageProvider } from './kimiUsage';
 import { discoverProjectAgents } from './agentRoster';
 import { ensureHooksOnActivation, installHooks } from './hookInstaller';
@@ -127,6 +128,7 @@ export function activate(context: vscode.ExtensionContext) {
   const provider = new OfficeDashboardProvider(
     context.extensionUri,
     String(context.extension.packageJSON.version ?? ''),
+    footerMetaHtml(context.extension.packageJSON),
   );
 
   const configPath = vscode.workspace

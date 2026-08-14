@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+#
+# Local hook for the ai-office-dashboard project.
+# Tags a release the moment its version bump is committed.
+#
+# The tag debt this closes was pure manual drift: v0.14.0–v0.18.1 were bumped,
+# built and shipped, and nobody ran `git tag`. Now the commit that changes
+# `version` in package.json carries its own `vX.Y.Z`.
+#
+# Annotated on purpose — `git push --follow-tags` pushes annotated tags and
+# silently ignores lightweight ones, and `push.followTags` is switched on by
+# `npm run hooks:install`, so a normal `git push` carries the tag along.
+
+set -euo pipefail
+
+pkg_version() {
+    git show "$1:package.json" 2>/dev/null |
+        node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{process.stdout.write(String(JSON.parse(s).version||''))}catch(e){}})" 2>/dev/null || true
+}
+
+version=$(pkg_version HEAD)
+[ -n "$version" ] || exit 0
+
+# An unchanged version means this commit is not a release — nothing to tag.
+# The root commit has no parent, so its version counts as a bump.
+if git rev-parse -q --verify HEAD~1 >/dev/null 2>&1; then
+    [ "$version" != "$(pkg_version HEAD~1)" ] || exit 0
+fi
+
+tag="v$version"
+
+# Re-committing the same version (amend, cherry-pick, a rebased history) must
+# not clobber a tag that already points somewhere — moving a pushed tag is the
+# one thing worse than a missing one.
+if git rev-parse -q --verify "refs/tags/$tag" >/dev/null 2>&1; then
+    if [ "$(git rev-parse "refs/tags/$tag^{commit}")" != "$(git rev-parse HEAD)" ]; then
+        echo "[post-commit] $tag already exists on another commit — not moving it." >&2
+    fi
+    exit 0
+fi
+
+git tag -a "$tag" -m "$(git log -1 --format=%s)"
+echo "[post-commit] tagged $tag — 'git push' will carry it (push.followTags)." >&2
