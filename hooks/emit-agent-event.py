@@ -54,14 +54,36 @@ def all_stop_flag_paths():
     """All flag files — a human prompt releases the stop for every cli at once."""
     return [claude_stop_flag_path(), kimi_stop_flag_path()]
 
+def stop_flag_expired(flag):
+    """True when the flag carries an `until` deadline that has already passed.
+
+    The auto-stop stamps `until` with the reset time of the limit that fired:
+    once that window is over there is nothing left to protect, so the flag
+    must not block tomorrow's session. A manual stop has no `until` and never
+    expires. An unparsable value is treated as "no deadline" — blocking is the
+    safe side. Keep in sync with emit-agent-event.js / src/stopFlag.ts.
+    """
+    until = flag.get("until")
+    if not isinstance(until, str) or not until:
+        return False
+    try:
+        deadline = datetime.fromisoformat(until.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if deadline.tzinfo is None:
+        deadline = deadline.replace(tzinfo=timezone.utc)
+    return deadline <= datetime.now(timezone.utc)
+
 def load_stop_flag(flag_path):
-    """Parsed active stop flag, or None (missing / malformed / inactive)."""
+    """Parsed active stop flag, or None (missing / malformed / inactive / expired)."""
     try:
         with open(flag_path, encoding="utf-8-sig") as f:
             flag = json.load(f)
     except (OSError, ValueError):
         return None
-    return flag if isinstance(flag, dict) and flag.get("active") else None
+    if not isinstance(flag, dict) or not flag.get("active"):
+        return None
+    return None if stop_flag_expired(flag) else flag
 
 def stop_covers_cwd(flag, cwd):
     """True when the stop flag applies to a session running in `cwd`.

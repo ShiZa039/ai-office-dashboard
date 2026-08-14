@@ -172,6 +172,51 @@ assert.strictEqual(lastEvent().event, 'tool_activity', 'allowed call still appen
 fs.writeFileSync(stopFlagFile, JSON.stringify({ active: false, cwds: [] }), 'utf-8');
 assert.strictEqual(runGate({ session_id: 'S1', cwd: '/p' }), '', 'inactive flag passes');
 
+// --- expired flag (auto-stop past its limit window): gate allows ---
+
+fs.writeFileSync(
+  stopFlagFile,
+  JSON.stringify({ active: true, cwds: ['/p'], since: 'T0', until: '2020-01-01T00:00:00Z' }),
+  'utf-8',
+);
+assert.strictEqual(
+  runGate({ session_id: 'S1', cwd: '/p' }),
+  '',
+  'a stop whose limit window has reset no longer blocks',
+);
+
+// --- flag still inside its window: gate denies ---
+
+fs.writeFileSync(
+  stopFlagFile,
+  JSON.stringify({ active: true, cwds: ['/p'], since: 'T0', until: '2099-01-01T00:00:00Z' }),
+  'utf-8',
+);
+{
+  const decision = JSON.parse(runGate({ session_id: 'S1', cwd: '/p' }));
+  assert.strictEqual(
+    decision.hookSpecificOutput.permissionDecision,
+    'deny',
+    'a deadline in the future still blocks',
+  );
+}
+
+// --- unparsable deadline: blocking is the safe side ---
+
+fs.writeFileSync(
+  stopFlagFile,
+  JSON.stringify({ active: true, cwds: ['/p'], since: 'T0', until: 'whenever' }),
+  'utf-8',
+);
+{
+  const decision = JSON.parse(runGate({ session_id: 'S1', cwd: '/p' }));
+  assert.strictEqual(
+    decision.hookSpecificOutput.permissionDecision,
+    'deny',
+    'a garbage deadline is treated as no deadline',
+  );
+}
+
 // --- global flag (empty cwds) denies everywhere ---
 
 fs.writeFileSync(stopFlagFile, JSON.stringify({ active: true, cwds: [] }), 'utf-8');

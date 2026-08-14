@@ -59,12 +59,28 @@ function allStopFlagPaths() {
   return [claudeStopFlagPath(), kimiStopFlagPath()];
 }
 
-/** Parsed active stop flag, or null (missing / malformed / inactive). */
+/**
+ * True when the flag carries an `until` deadline that has already passed.
+ *
+ * The auto-stop stamps `until` with the reset time of the limit that fired:
+ * once that window is over there is nothing left to protect, so the flag must
+ * not block tomorrow's session. A manual stop has no `until` and never
+ * expires. An unparsable value is treated as "no deadline" \u2014 blocking is the
+ * safe side. Keep in sync with emit-agent-event.py / src/stopFlag.ts.
+ */
+function stopFlagExpired(flag) {
+  if (typeof flag.until !== 'string' || !flag.until) return false;
+  const deadline = Date.parse(flag.until);
+  return Number.isFinite(deadline) && deadline <= Date.now();
+}
+
+/** Parsed active stop flag, or null (missing / malformed / inactive / expired). */
 function loadStopFlag(flagPath) {
   try {
     // Strip a possible BOM (hand-edited flag files saved as UTF-8 with BOM).
     const flag = JSON.parse(fs.readFileSync(flagPath, 'utf-8').replace(/^\uFEFF/, '').trim());
-    return flag && typeof flag === 'object' && flag.active ? flag : null;
+    if (!flag || typeof flag !== 'object' || !flag.active) return null;
+    return stopFlagExpired(flag) ? null : flag;
   } catch (e) {
     return null;
   }

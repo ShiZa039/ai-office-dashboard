@@ -21,7 +21,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import { contextWindowTokens, costOfModels, costUsd } from './pricing';
+import { CostParts, contextWindowTokens, costOfModels, costPartsOfModels, costUsd } from './pricing';
 
 export interface TokenTotals {
   /** Plain (uncached) prompt tokens. */
@@ -150,6 +150,8 @@ export interface TokenSnapshot {
     byAgent: AgentSlice[];
     /** API-list-price cost of the session; null when nothing was priceable. */
     costUsd: number | null;
+    /** The same cost split by billing lane (full price vs the cache lanes). */
+    costParts: CostParts | null;
     context: ContextGauge | null;
   } | null;
   total: TokenTotals;
@@ -159,6 +161,8 @@ export interface TokenSnapshot {
   byAgent: AgentSlice[];
   /** API-list-price cost of the whole project (retired transcripts included). */
   totalCostUsd: number | null;
+  /** The project-wide cost split by billing lane. */
+  totalCostParts: CostParts | null;
   /**
    * Priced spend of the last 30 days (live transcripts only — files already
    * pruned by the CLI can't contribute). null until anything was priced.
@@ -341,6 +345,8 @@ export class TokenScanner {
   private known = new Map<string, Bucket[]>();
   private cwdFilters: string[] | null = null;
   private scanning = false;
+  /** The user's Claude Code model selection, for sizing the context gauge. */
+  private modelSelection: string | null = null;
 
   constructor(
     private root: string,
@@ -367,6 +373,15 @@ export class TokenScanner {
       .map((c) => normalizeCwd(c))
       .filter(Boolean);
     this.cwdFilters = list.length > 0 ? list : null;
+  }
+
+  /**
+   * The model the user picked in Claude Code (`opus[1m]`, …). Transcripts
+   * record the resolved id without the context-window marker, so this is what
+   * tells a 1M session apart from a 200K one — see modelSelection.ts.
+   */
+  setModelSelection(selection: string | null): void {
+    this.modelSelection = selection;
   }
 
   private matchesCwd(cwd: string): boolean {
@@ -431,6 +446,7 @@ export class TokenScanner {
               byModel: modelSlices(session.byModel),
               byAgent: agentSlices(session.byAgent),
               costUsd: costOfModels(session.byModel),
+              costParts: costPartsOfModels(session.byModel),
               context: this.contextFor(id),
             }
           : null,
@@ -438,6 +454,7 @@ export class TokenScanner {
       byModel: modelSlices(total.byModel),
       byAgent: agentSlices(total.byAgent),
       totalCostUsd: costOfModels(total.byModel),
+      totalCostParts: costPartsOfModels(total.byModel),
       last30dCostUsd: this.last30dCost(),
     };
   }
@@ -450,7 +467,14 @@ export class TokenScanner {
       if (ctx && (!best || ctx.ts > best.ts)) best = ctx;
     }
     if (!best) return null;
-    return { tokens: best.tokens, window: contextWindowTokens(best.model), model: best.model };
+    return {
+      tokens: best.tokens,
+      window: contextWindowTokens(best.model, {
+        selection: this.modelSelection,
+        observedTokens: best.tokens,
+      }),
+      model: best.model,
+    };
   }
 
   /** Priced spend of the last 30 calendar days across the project's live files. */

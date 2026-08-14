@@ -77,47 +77,116 @@ export function priceForModel(raw: string): ModelPrice | null {
 }
 
 /**
- * API cost in USD of the given spend on the given model; null when the model
- * is unpriced. The 1h share of cache writes is billed at 2×, the rest at 1.25×.
+ * The bill split the way it is actually charged: full-rate prompt tokens and
+ * output on one side, the two discounted cache lanes on the other. Cache
+ * traffic dominates the token counts but is a fraction of the money, and only
+ * this split shows that.
  */
-export function costUsd(raw: string, t: TokenTotals): number | null {
+export interface CostParts {
+  /** Uncached prompt tokens, at the full input rate. */
+  input: number;
+  /** Generated tokens, at the output rate. */
+  output: number;
+  /** Cache writes (1.25× input for the 5m TTL, 2× for the 1h one). */
+  cacheWrite: number;
+  /** Cache reads (0.1× input). */
+  cacheRead: number;
+  total: number;
+}
+
+export function emptyCostParts(): CostParts {
+  return { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, total: 0 };
+}
+
+/**
+ * API cost in USD of the given spend on the given model, split by what is
+ * billed at which rate; null when the model is unpriced.
+ */
+export function costPartsUsd(raw: string, t: TokenTotals): CostParts | null {
   const price = priceForModel(raw);
   if (!price) return null;
   const cache1h = Math.min(t.cacheCreate1h ?? 0, t.cacheCreate);
   const cache5m = t.cacheCreate - cache1h;
-  return (
-    (t.input * price.input +
-      t.output * price.output +
-      cache5m * price.input * CACHE_WRITE_5M +
-      cache1h * price.input * CACHE_WRITE_1H +
-      t.cacheRead * price.input * CACHE_READ) /
-    1e6
-  );
+  const input = (t.input * price.input) / 1e6;
+  const output = (t.output * price.output) / 1e6;
+  const cacheWrite =
+    (cache5m * price.input * CACHE_WRITE_5M + cache1h * price.input * CACHE_WRITE_1H) / 1e6;
+  const cacheRead = (t.cacheRead * price.input * CACHE_READ) / 1e6;
+  return { input, output, cacheWrite, cacheRead, total: input + output + cacheWrite + cacheRead };
+}
+
+/**
+ * API cost in USD of the given spend on the given model; null when the model
+ * is unpriced. The 1h share of cache writes is billed at 2×, the rest at 1.25×.
+ */
+export function costUsd(raw: string, t: TokenTotals): number | null {
+  const parts = costPartsUsd(raw, t);
+  return parts ? parts.total : null;
 }
 
 /** Sum the priced share of a per-model split; null when nothing was priced. */
 export function costOfModels(byModel: Record<string, TokenTotals>): number | null {
-  let sum = 0;
+  const parts = costPartsOfModels(byModel);
+  return parts ? parts.total : null;
+}
+
+/** The same sum, kept split by billing lane. */
+export function costPartsOfModels(byModel: Record<string, TokenTotals>): CostParts | null {
+  const sum = emptyCostParts();
   let priced = false;
   for (const [raw, totals] of Object.entries(byModel)) {
-    const c = costUsd(raw, totals);
-    if (c === null) continue;
-    sum += c;
+    const parts = costPartsUsd(raw, totals);
+    if (!parts) continue;
+    sum.input += parts.input;
+    sum.output += parts.output;
+    sum.cacheWrite += parts.cacheWrite;
+    sum.cacheRead += parts.cacheRead;
+    sum.total += parts.total;
     priced = true;
   }
   return priced ? sum : null;
 }
 
+const FAMILIES = ['opus', 'sonnet', 'haiku', 'fable', 'mythos'];
+
+/** Which family a model *selection* names ("opus[1m]" → "opus"); null if none. */
+export function selectionFamily(selection: string): string | null {
+  const lower = selection.toLowerCase();
+  return FAMILIES.find((f) => lower.includes(f)) ?? null;
+}
+
+export interface ContextWindowHint {
+  /**
+   * The user's Claude Code model selection, e.g. `opus[1m]` from
+   * `~/.claude/settings.json`. Transcripts record the resolved id
+   * (`claude-opus-5`) and drop the `[1m]` marker, so the selection is the only
+   * place the 1M context shows up before the prompt actually outgrows 200K.
+   */
+  selection?: string | null;
+  /** Prompt size actually observed — a window cannot be smaller than this. */
+  observedTokens?: number;
+}
+
 /**
  * Best-effort context-window size for the session gauge. Claude Code runs at
- * 200K unless the 1M context is explicitly on (the `[1m]` id suffix); Fable
- * and Mythos are 1M-only models. Unknown (non-Claude) ids get null — no gauge.
+ * 200K unless the 1M context is on: explicitly (the `[1m]` id suffix), by the
+ * user's model selection, or provably (a prompt that already exceeds 200K).
+ * Fable and Mythos are 1M-only models. Unknown (non-Claude) ids get null — no
+ * gauge.
  */
-export function contextWindowTokens(raw: string): number | null {
+export function contextWindowTokens(raw: string, hint?: ContextWindowHint): number | null {
   const lower = raw.toLowerCase();
   const id = parseClaudeId(raw);
   if (!id) return null;
   if (lower.includes('[1m]')) return 1_000_000;
   if (id.family === 'fable' || id.family === 'mythos') return 1_000_000;
+  const selection = hint?.selection ?? '';
+  if (selection.toLowerCase().includes('[1m]')) {
+    // Only trust the selection for the model it names: a Haiku subagent does
+    // not inherit the 1M window picked for Opus.
+    const family = selectionFamily(selection);
+    if (!family || family === id.family) return 1_000_000;
+  }
+  if ((hint?.observedTokens ?? 0) > 200_000) return 1_000_000;
   return 200_000;
 }

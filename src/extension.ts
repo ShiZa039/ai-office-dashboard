@@ -13,8 +13,9 @@ import {
   claudeUsageProvider,
 } from './subscriptionUsage';
 import { PaceStatus, nextAlertLevel } from './usagePace';
-import { AutoStopLatch } from './autoStop';
+import { AutoStopLatch, fileLatchStore } from './autoStop';
 import { PersistedTokenState, TokenScanner } from './tokenUsage';
+import { readModelSelection } from './modelSelection';
 import { kimiUsageProvider } from './kimiUsage';
 import { discoverProjectAgents } from './agentRoster';
 import { ensureHooksOnActivation, installHooks } from './hookInstaller';
@@ -435,26 +436,54 @@ export function activate(context: vscode.ExtensionContext) {
       .get<number>('autoStop.thresholdPercent', 95);
     return Math.min(100, Math.max(50, v));
   };
-  const autoStopLatch = new AutoStopLatch();
+  /** Last-warning threshold; never below the main one (equal = single shot). */
+  const autoStopFinalPct = () => {
+    const v = vscode.workspace
+      .getConfiguration('aiOffice')
+      .get<number>('autoStop.finalThresholdPercent', 99);
+    return Math.min(100, Math.max(autoStopThresholdPct(), v));
+  };
+  // File-backed so the fuse survives window reloads and is shared between
+  // windows — an in-memory latch re-armed on every activation and fired again
+  // on the first poll while the limit was still over the threshold.
+  const autoStopLatch = new AutoStopLatch(fileLatchStore());
 
   const maybeAutoStop = (snapshot: SubscriptionSnapshot, ru: boolean) => {
     // The latch runs on every snapshot (even disabled/already stopped) so a
     // stop the user released is not re-tripped by the very next poll.
-    const hit = autoStopLatch.check(snapshot, autoStopThresholdPct());
+    const hit = autoStopLatch.check(snapshot, {
+      warn: autoStopThresholdPct(),
+      final: autoStopFinalPct(),
+    });
     if (!hit || !autoStopEnabled() || stopActive) return;
+    const lim = hit.limit;
     const cwds = currentCwdFilter();
+    // The reason to block dies with the limit window — let the flag expire
+    // with it instead of greeting the user in tomorrow's session.
+    const until = lim.resetsAt ?? null;
     try {
-      activateStopEverywhere(cwds, new Date().toISOString());
+      activateStopEverywhere(cwds, new Date().toISOString(), until);
     } catch (err) {
       log.appendLine(`AI Office: failed to write the auto-stop flag: ${String(err)}`);
       return;
     }
     refreshStopState();
     const global = !cwds || cwds.length === 0;
-    const name = `${snapshot.provider === 'kimi' ? 'Kimi Code' : 'Claude Code'} ${hit.label}`;
-    const pct = hit.utilization.toFixed(0);
+    const name = `${snapshot.provider === 'kimi' ? 'Kimi Code' : 'Claude Code'} ${lim.label}`;
+    const pct = lim.utilization.toFixed(0);
+    const threshold = hit.level === 2 ? autoStopFinalPct() : autoStopThresholdPct();
     log.appendLine(
-      `AI Office: auto-stop (${global ? 'global' : 'this project'}) — ${name} at ${pct}% (threshold ${autoStopThresholdPct()}%)`,
+      `AI Office: auto-stop (${global ? 'global' : 'this project'}) — ${name} at ${pct}% ` +
+        `(threshold ${threshold}%, level ${hit.level}${hit.level === 2 ? ' — last warning' : ''}` +
+        `${until ? `, expires ${until}` : ''})`,
+    );
+    // The whole snapshot, so a stop that fires when it should not can be
+    // diagnosed from the log instead of by reasoning about the latch.
+    log.appendLine(
+      `AI Office: limits at that moment — ` +
+        snapshot.limits
+          .map((l) => `${l.label} [${l.kind}] ${l.utilization.toFixed(1)}% resets ${l.resetsAt ?? '?'}`)
+          .join(' | '),
     );
     const scopeRu = global
       ? 'во всех проектах (в окне нет папки или включён scope=global)'
@@ -462,10 +491,28 @@ export function activate(context: vscode.ExtensionContext) {
     const scopeEn = global
       ? 'in every project (this window has no folder, or scope=global is set)'
       : 'in this project';
+    const headRu =
+      hit.level === 2
+        ? `АВТОСТОП (последнее предупреждение) — ${name} достиг ${pct}% (порог ${threshold}%)`
+        : `АВТОСТОП — ${name} достиг ${pct}% (порог ${threshold}%)`;
+    const headEn =
+      hit.level === 2
+        ? `AUTO-STOP (last warning) — ${name} reached ${pct}% (threshold ${threshold}%)`
+        : `AUTO-STOP — ${name} reached ${pct}% (threshold ${threshold}%)`;
+    const tailRu =
+      hit.level === 2
+        ? 'Снимите остановку кнопкой или новым промптом — до сброса лимита она больше не сработает.'
+        : 'Снимите остановку кнопкой или новым промптом; следующий (и последний) раз она сработает только на ' +
+          `${autoStopFinalPct()}%.`;
+    const tailEn =
+      hit.level === 2
+        ? 'Release it with the stop button or a new prompt — it will not fire again until the limit resets.'
+        : 'Release it with the stop button or a new prompt; it will fire once more only at ' +
+          `${autoStopFinalPct()}%.`;
     void vscode.window.showWarningMessage(
       ru
-        ? `AI Office: АВТОСТОП — ${name} достиг ${pct}% (порог ${autoStopThresholdPct()}%). Вызовы инструментов ${scopeRu} заблокированы; кнопка остановки или новый промпт снимает блокировку.`
-        : `AI Office: AUTO-STOP — ${name} reached ${pct}% (threshold ${autoStopThresholdPct()}%). Tool calls ${scopeEn} are blocked; the stop button or a new prompt releases it.`,
+        ? `AI Office: ${headRu}. Вызовы инструментов ${scopeRu} заблокированы. ${tailRu}`
+        : `AI Office: ${headEn}. Tool calls ${scopeEn} are blocked. ${tailEn}`,
     );
   };
 
@@ -574,6 +621,10 @@ export function activate(context: vscode.ExtensionContext) {
 
     const tick = async () => {
       try {
+        // Re-read every pass: the selection changes under us when the user
+        // runs /model, and it is two small JSON files next to the transcripts
+        // we are already walking.
+        scanner.setModelSelection(readModelSelection(currentCwdFilter()));
         await scanner.scan();
         provider.updateTokens({
           ...scanner.snapshot(store?.getLastSession() ?? null),

@@ -18,10 +18,27 @@ export interface StopFlag {
   cwds: string[];
   /** ISO timestamp of activation. */
   since: string;
+  /**
+   * ISO timestamp after which the flag is dead, or null for "until someone
+   * releases it". The auto-stop sets it to the reset time of the limit that
+   * fired: once the window is over, the reason to block is gone, and nobody
+   * should walk into yesterday's stop. A manual stop stays indefinite.
+   */
+  until?: string | null;
 }
 
-/** Parse flag file content. Returns null for malformed or inactive flags. */
-export function parseStopFlag(raw: string | null | undefined): StopFlag | null {
+/** Parse flag file content, ignoring what has already expired. */
+export function parseStopFlag(
+  raw: string | null | undefined,
+  nowMs: number = Date.now(),
+): StopFlag | null {
+  const flag = parseStopFlagRaw(raw);
+  if (!flag) return null;
+  return stopFlagExpired(flag, nowMs) ? null : flag;
+}
+
+/** Parse without the expiry check — for callers that clean the file up. */
+function parseStopFlagRaw(raw: string | null | undefined): StopFlag | null {
   if (!raw) return null;
   let parsed: unknown;
   try {
@@ -39,29 +56,50 @@ export function parseStopFlag(raw: string | null | undefined): StopFlag | null {
     active: true,
     cwds,
     since: typeof obj.since === 'string' ? obj.since : '',
+    until: typeof obj.until === 'string' && obj.until ? obj.until : null,
   };
+}
+
+/** Is the flag's own deadline in the past? An unparsable `until` never expires. */
+export function stopFlagExpired(flag: StopFlag, nowMs: number = Date.now()): boolean {
+  if (!flag.until) return false;
+  const t = Date.parse(flag.until);
+  return Number.isFinite(t) && t <= nowMs;
 }
 
 /**
  * Build the flag for activation. Merges with an already-active flag from
  * another window: a global stop (empty cwds) on either side stays global,
- * otherwise the cwd lists are united.
+ * otherwise the cwd lists are united. Deadlines merge conservatively — an
+ * indefinite stop on either side wins, otherwise the later one does, so an
+ * auto-stop can never shorten a manual one.
  */
 export function activateStopFlag(
   existing: StopFlag | null,
   cwds: string[] | null,
   now: string,
+  until: string | null = null,
 ): StopFlag {
   const ours = cwds ?? [];
-  if (!existing) return { active: true, cwds: ours, since: now };
+  if (!existing) return { active: true, cwds: ours, since: now, until };
+  const mergedUntil = mergeUntil(existing.until ?? null, until);
   if (existing.cwds.length === 0 || ours.length === 0) {
-    return { active: true, cwds: [], since: existing.since || now };
+    return { active: true, cwds: [], since: existing.since || now, until: mergedUntil };
   }
   const union = [...existing.cwds];
   for (const c of ours) {
     if (!union.some((u) => samePath(u, c))) union.push(c);
   }
-  return { active: true, cwds: union, since: existing.since || now };
+  return { active: true, cwds: union, since: existing.since || now, until: mergedUntil };
+}
+
+function mergeUntil(a: string | null, b: string | null): string | null {
+  if (!a || !b) return null; // one side is indefinite → the merge is too
+  const ta = Date.parse(a);
+  const tb = Date.parse(b);
+  if (!Number.isFinite(ta)) return a;
+  if (!Number.isFinite(tb)) return b;
+  return ta >= tb ? a : b;
 }
 
 /**
@@ -80,7 +118,7 @@ export function deactivateStopFlag(
   if (existing.cwds.length === 0 || ours.length === 0) return null;
   const remaining = existing.cwds.filter((c) => !ours.some((o) => pathsOverlap(c, o)));
   if (remaining.length === 0) return null;
-  return { active: true, cwds: remaining, since: existing.since };
+  return { active: true, cwds: remaining, since: existing.since, until: existing.until ?? null };
 }
 
 function normPath(p: string): string {
@@ -131,12 +169,20 @@ export function stopFlagPaths(): string[] {
   return [stopFlagPath(), kimiStopFlagPath()];
 }
 
+/** Read one flag file, deleting it when its own deadline has passed. */
 function readStopFlagAt(file: string): StopFlag | null {
+  let flag: StopFlag | null;
   try {
-    return parseStopFlag(fs.readFileSync(file, 'utf-8'));
+    flag = parseStopFlagRaw(fs.readFileSync(file, 'utf-8'));
   } catch {
     return null;
   }
+  if (!flag) return null;
+  if (stopFlagExpired(flag)) {
+    clearStopFlagAt(file);
+    return null;
+  }
+  return flag;
 }
 
 function writeStopFlagAt(file: string, flag: StopFlag): void {
@@ -173,10 +219,18 @@ export function clearStopFlag(): void {
   }
 }
 
-/** Activate the stop for `cwds` in every cli's flag file (merging per file). */
-export function activateStopEverywhere(cwds: string[] | null, now: string): void {
+/**
+ * Activate the stop for `cwds` in every cli's flag file (merging per file).
+ * `until` (ISO) makes it expire on its own — used by the auto-stop, which
+ * blocks only until the limit window that fired has reset.
+ */
+export function activateStopEverywhere(
+  cwds: string[] | null,
+  now: string,
+  until: string | null = null,
+): void {
   for (const file of stopFlagPaths()) {
-    writeStopFlagAt(file, activateStopFlag(readStopFlagAt(file), cwds, now));
+    writeStopFlagAt(file, activateStopFlag(readStopFlagAt(file), cwds, now, until));
   }
 }
 

@@ -1,5 +1,12 @@
 import * as assert from 'assert';
-import { contextWindowTokens, costOfModels, costUsd, priceForModel } from '../src/pricing';
+import {
+  contextWindowTokens,
+  costOfModels,
+  costPartsOfModels,
+  costPartsUsd,
+  costUsd,
+  priceForModel,
+} from '../src/pricing';
 import { TokenTotals } from '../src/tokenUsage';
 
 function totals(t: Partial<TokenTotals>): TokenTotals {
@@ -98,5 +105,106 @@ assert.strictEqual(contextWindowTokens('claude-opus-5[1m]'), 1_000_000, 'explici
 assert.strictEqual(contextWindowTokens('claude-fable-5'), 1_000_000, 'fable is a 1M-only model');
 assert.strictEqual(contextWindowTokens('claude-haiku-4-5-20251001'), 200_000, 'haiku window');
 assert.strictEqual(contextWindowTokens('kimi-k2'), null, 'unknown model → no gauge');
+
+// The transcript records the resolved id without the marker, so the user's
+// selection has to carry the 1M window over to it.
+assert.strictEqual(
+  contextWindowTokens('claude-opus-5', { selection: 'opus[1m]' }),
+  1_000_000,
+  'the selected 1M context applies to the model it names',
+);
+assert.strictEqual(
+  contextWindowTokens('claude-haiku-4-5-20251001', { selection: 'opus[1m]' }),
+  200_000,
+  'a Haiku subagent does not inherit the 1M window picked for Opus',
+);
+assert.strictEqual(
+  contextWindowTokens('claude-opus-5', { selection: 'claude-opus-5[1m]' }),
+  1_000_000,
+  'a full id as the selection works too',
+);
+assert.strictEqual(
+  contextWindowTokens('claude-opus-5', { selection: '[1m]' }),
+  1_000_000,
+  'a selection naming no family is taken at face value',
+);
+assert.strictEqual(
+  contextWindowTokens('claude-opus-5', { selection: 'opus' }),
+  200_000,
+  'a selection without the marker changes nothing',
+);
+assert.strictEqual(
+  contextWindowTokens('claude-opus-5', { selection: null }),
+  200_000,
+  'no selection changes nothing',
+);
+assert.strictEqual(
+  contextWindowTokens('claude-opus-5', { observedTokens: 240_000 }),
+  1_000_000,
+  'a prompt bigger than 200K proves the window is bigger, whatever the settings say',
+);
+assert.strictEqual(
+  contextWindowTokens('claude-opus-5', { observedTokens: 199_000 }),
+  200_000,
+  'a prompt that fits proves nothing',
+);
+
+// --- costPartsUsd: what is billed at which rate ---
+
+{
+  const parts = costPartsUsd(
+    'claude-opus-5',
+    totals({ input: 1_000_000, output: 1_000_000, cacheCreate: 1_000_000, cacheRead: 1_000_000 }),
+  );
+  assert.ok(parts, 'opus is priced');
+  assert.strictEqual(parts!.input, 5, 'full-price prompt at $5/MTok');
+  assert.strictEqual(parts!.output, 25, 'output at $25/MTok');
+  assert.strictEqual(parts!.cacheWrite, 6.25, '5m cache writes at 1.25×');
+  assert.strictEqual(parts!.cacheRead, 0.5, 'cache reads at 0.1×');
+  assert.strictEqual(parts!.total, 36.75, 'the parts add up to the total');
+  assert.strictEqual(
+    costUsd('claude-opus-5', totals({ input: 1_000_000, output: 1_000_000, cacheCreate: 1_000_000, cacheRead: 1_000_000 })),
+    parts!.total,
+    'costUsd is the same number as the sum of the parts',
+  );
+}
+
+{
+  const parts = costPartsUsd(
+    'claude-opus-5',
+    totals({ cacheCreate: 1_000_000, cacheCreate1h: 1_000_000 }),
+  );
+  assert.strictEqual(parts!.cacheWrite, 10, '1h cache writes at 2×');
+}
+
+assert.strictEqual(costPartsUsd('kimi-k2', totals({ input: 10 })), null, 'unpriced model → null');
+
+// --- costPartsOfModels ---
+
+{
+  const parts = costPartsOfModels({
+    'claude-opus-5': totals({ input: 1_000_000 }),
+    'claude-haiku-4-5-20251001': totals({ output: 1_000_000 }),
+    'kimi-k2-turbo-preview': totals({ input: 5_000_000 }),
+  });
+  assert.strictEqual(parts!.input, 5, 'only priced input counted');
+  assert.strictEqual(parts!.output, 5, 'haiku output at $5/MTok');
+  assert.strictEqual(parts!.total, 10, 'total matches costOfModels');
+  assert.strictEqual(
+    costOfModels({
+      'claude-opus-5': totals({ input: 1_000_000 }),
+      'claude-haiku-4-5-20251001': totals({ output: 1_000_000 }),
+      'kimi-k2-turbo-preview': totals({ input: 5_000_000 }),
+    }),
+    parts!.total,
+    'costOfModels agrees with the split',
+  );
+}
+
+assert.strictEqual(
+  costPartsOfModels({ 'kimi-k2': totals({ input: 10 }) }),
+  null,
+  'nothing priceable → null, not a zeroed split',
+);
 
 console.log('pricing.test: OK');

@@ -112,6 +112,9 @@ For most projects the heuristics are enough вЂ” no configuration needed.
 | `aiOffice.usage.limitWeeklyUsd` | `0` | $ limit per week (ccusage bars only) |
 | `aiOffice.usage.limitWeeklyOpusUsd` | `0` | $ limit per week for Opus (ccusage bars only) |
 | `aiOffice.usage.degradationAlerts` | `true` | Warn when a plan quota degrades (running hot / critically low / depleted) |
+| `aiOffice.autoStop.enabled` | `true` | Trip the emergency stop by itself when a plan limit reaches the threshold. One-shot per limit window: it fires at the threshold, once more at the final threshold, then stays quiet until the limit resets |
+| `aiOffice.autoStop.thresholdPercent` | `95` | Plan-limit utilization (%) that trips the auto-stop |
+| `aiOffice.autoStop.finalThresholdPercent` | `99` | Utilization (%) of the last warning for that window; equal to the main threshold = a single shot |
 
 ## Commands
 

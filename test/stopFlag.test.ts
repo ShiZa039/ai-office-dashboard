@@ -5,6 +5,7 @@ import {
   deactivateStopFlag,
   parseStopFlag,
   stopAppliesToWindow,
+  stopFlagExpired,
   stopFlagPaths,
   StopFlag,
 } from '../src/stopFlag';
@@ -28,15 +29,63 @@ assert.strictEqual(parseStopFlag('[1,2]'), null, 'non-object json');
   const flag = parseStopFlag('{"active": true}');
   assert.ok(flag, 'flag without cwds parsed');
   assert.deepStrictEqual(flag!.cwds, [], 'missing cwds → global stop');
+  assert.strictEqual(flag!.until, null, 'no deadline by default');
 }
+
+// --- expiry: an auto-stop dies with the limit window that caused it ---
+
+const NOW_MS = Date.parse('2026-07-14T12:00:00.000Z');
+
+assert.strictEqual(
+  parseStopFlag('{"active": true, "until": "2026-07-14T11:00:00Z"}', NOW_MS),
+  null,
+  'a flag past its deadline reads as released',
+);
+{
+  const flag = parseStopFlag('{"active": true, "until": "2026-07-14T13:00:00Z"}', NOW_MS);
+  assert.ok(flag, 'a flag inside its window is still active');
+  assert.strictEqual(flag!.until, '2026-07-14T13:00:00Z', 'deadline preserved');
+}
+assert.strictEqual(
+  stopFlagExpired({ active: true, cwds: [], since: '', until: 'garbage' }, NOW_MS),
+  false,
+  'an unparsable deadline never expires — blocking is the safe side',
+);
+assert.strictEqual(
+  stopFlagExpired({ active: true, cwds: [], since: '' }, NOW_MS),
+  false,
+  'a manual stop has no deadline',
+);
 
 // --- activateStopFlag ---
 
 const NOW = '2026-07-14T12:00:00.000Z';
+const LATER = '2026-07-14T17:00:00.000Z';
 
 {
   const flag = activateStopFlag(null, ['/proj/a'], NOW);
-  assert.deepStrictEqual(flag, { active: true, cwds: ['/proj/a'], since: NOW }, 'fresh workspace stop');
+  assert.deepStrictEqual(
+    flag,
+    { active: true, cwds: ['/proj/a'], since: NOW, until: null },
+    'fresh workspace stop',
+  );
+}
+
+{
+  const flag = activateStopFlag(null, ['/proj/a'], NOW, LATER);
+  assert.strictEqual(flag.until, LATER, 'auto-stop carries its own deadline');
+}
+
+{
+  const existing: StopFlag = { active: true, cwds: ['/proj/a'], since: 'T0', until: null };
+  const flag = activateStopFlag(existing, ['/proj/a'], NOW, LATER);
+  assert.strictEqual(flag.until, null, 'an auto-stop cannot cut short a manual one');
+}
+
+{
+  const existing: StopFlag = { active: true, cwds: ['/proj/a'], since: 'T0', until: NOW };
+  const flag = activateStopFlag(existing, ['/proj/b'], NOW, LATER);
+  assert.strictEqual(flag.until, LATER, 'the later deadline wins');
 }
 
 {
@@ -72,12 +121,12 @@ const B = path.join(path.sep, 'proj', 'b');
 assert.strictEqual(deactivateStopFlag(null, [A]), null, 'no flag → nothing to release');
 
 {
-  const existing: StopFlag = { active: true, cwds: [A, B], since: 'T0' };
+  const existing: StopFlag = { active: true, cwds: [A, B], since: 'T0', until: LATER };
   const flag = deactivateStopFlag(existing, [A]);
   assert.deepStrictEqual(
     flag,
-    { active: true, cwds: [B], since: 'T0' },
-    'only own project released, other window stop survives',
+    { active: true, cwds: [B], since: 'T0', until: LATER },
+    'only own project released, other window stop survives (with its deadline)',
   );
 }
 
