@@ -31,9 +31,26 @@ assert.deepStrictEqual(priceForModel('claude-haiku-4-5-20251001'), { input: 1, o
 assert.deepStrictEqual(priceForModel('claude-3-5-haiku-20241022'), { input: 0.8, output: 4 }, 'haiku 3.5');
 assert.deepStrictEqual(priceForModel('claude-3-haiku-20240307'), { input: 0.25, output: 1.25 }, 'haiku 3');
 assert.deepStrictEqual(priceForModel('claude-opus-5[1m]'), { input: 5, output: 25 }, 'context suffix is the same model');
-assert.strictEqual(priceForModel('kimi-k2-turbo-preview'), null, 'non-Claude models are unpriced');
+assert.strictEqual(priceForModel('kimi-k2-turbo-preview'), null, 'kimi ids without a published price stay unpriced');
 assert.strictEqual(priceForModel(''), null, 'unknown model is unpriced');
 assert.strictEqual(priceForModel('<synthetic>'), null, 'placeholders are unpriced');
+
+// Kimi (docs/KIMI-USAGE.md §4): cache writes are plain input, reads are flat.
+assert.deepStrictEqual(
+  priceForModel('kimi-code/k3'),
+  { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3 },
+  'k3 tier',
+);
+assert.deepStrictEqual(
+  priceForModel('kimi-for-coding'),
+  { input: 0.95, output: 4, cacheRead: 0.19, cacheWrite: 0.95 },
+  'kimi-for-coding = Kimi K2.7 Code',
+);
+assert.deepStrictEqual(
+  priceForModel('kimi-code/kimi-for-coding-highspeed'),
+  { input: 1.9, output: 8, cacheWrite: 1.9 },
+  'highspeed tier',
+);
 
 // --- costUsd ---
 
@@ -79,6 +96,16 @@ assert.strictEqual(
   'a 1h share larger than the total is clamped, never negative',
 );
 assert.strictEqual(costUsd('kimi-k2', totals({ input: 1e6 })), null, 'unpriced model → null, not 0');
+assert.strictEqual(
+  costUsd('kimi-code/k3', totals({ input: 1_000_000, output: 1_000_000, cacheCreate: 1_000_000, cacheRead: 1_000_000 })),
+  3 + 15 + 3 + 0.3,
+  'k3: input $3, output $15, cache write 1× input, cache read $0.30',
+);
+assert.strictEqual(
+  costUsd('kimi-code/kimi-for-coding', totals({ cacheRead: 1_000_000 })),
+  0.19,
+  'k2.7-code cache reads at the flat $0.19, not 0.1× input',
+);
 
 // --- costOfModels ---
 
@@ -105,6 +132,9 @@ assert.strictEqual(contextWindowTokens('claude-opus-5[1m]'), 1_000_000, 'explici
 assert.strictEqual(contextWindowTokens('claude-fable-5'), 1_000_000, 'fable is a 1M-only model');
 assert.strictEqual(contextWindowTokens('claude-haiku-4-5-20251001'), 200_000, 'haiku window');
 assert.strictEqual(contextWindowTokens('kimi-k2'), null, 'unknown model → no gauge');
+assert.strictEqual(contextWindowTokens('kimi-code/k3'), 1_000_000, 'k3 is a 1M model');
+assert.strictEqual(contextWindowTokens('kimi-code/k3-256k'), 262_144, 'k3-256k is capped at 256K');
+assert.strictEqual(contextWindowTokens('kimi-code/kimi-for-coding'), 262_144, 'k2.7-code window');
 
 // The transcript records the resolved id without the marker, so the user's
 // selection has to carry the 1M window over to it.

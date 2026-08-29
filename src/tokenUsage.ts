@@ -1,10 +1,12 @@
 /**
- * Token accounting straight from the agent CLI transcripts
- * (`~/.claude/projects/<slug>/<session>.jsonl`).
+ * Token accounting straight from the agent CLI transcripts:
+ * `~/.claude/projects/<slug>/<session>.jsonl` (Claude Code) and
+ * `~/.kimi-code/sessions/<workDirKey>/<session>/agents/<agent>/wire.jsonl`
+ * (Kimi Code — format details in docs/KIMI-USAGE.md).
  *
  * Why not ccusage: the cost panel shells out to `npx ccusage` and is off by
- * default, while the transcripts already hold every `message.usage` block.
- * Reading them costs ~1s for a 250 MB history on the first pass and nothing
+ * default, while the transcripts already hold every usage record. Reading
+ * them costs ~1s for a 250 MB history on the first pass and nothing
  * afterwards (each file is re-read only from its last byte offset), needs no
  * network and no subprocess.
  *
@@ -94,6 +96,19 @@ interface ContextSample {
 interface FileState {
   /** Byte offset of the first not-yet-parsed line; transcripts only ever grow. */
   offset: number;
+  /** Which tree this file came from — Claude and Kimi layouts differ. */
+  kind: 'claude' | 'kimi';
+  /** The scan root the file sits under (anchor for project-dir resolution). */
+  root: string;
+  /**
+   * Kimi only: the wire file carries no cwd/session fields, so they are
+   * resolved once from the path and the sibling state.json. `kimiAgent` is
+   * the agent dir name ('main' = the main chain), upgraded to the
+   * profile.bind profileName once that line is parsed.
+   */
+  kimiCwd?: string;
+  kimiSession?: string;
+  kimiAgent?: string;
   buckets: Map<string, Bucket>;
   /** Newest entry timestamp seen per session, for "which session is current". */
   lastTs: Map<string, number>;
@@ -255,12 +270,23 @@ const MODEL_FAMILIES = ['opus', 'sonnet', 'haiku', 'fable'];
 
 /**
  * Transcript model id → what a human calls it: `claude-opus-4-5-20251101` and
- * `claude-3-5-haiku-20241022` both become "<Family> <version>". Anything that
- * is not a Claude id (Kimi and friends) is left exactly as it came, since we
- * have no naming rule we can trust for it.
+ * `claude-3-5-haiku-20241022` both become "<Family> <version>". Kimi ids come
+ * as `kimi-code/<alias>`; the known aliases get proper names, the rest are
+ * left exactly as they came — no naming rule we can trust for them.
  */
 export function modelLabel(raw: string): string {
   if (!raw) return '';
+  const kimiId = raw.toLowerCase().replace(/^kimi-code\//, '');
+  if (kimiId.startsWith('kimi-') || kimiId === 'k3' || kimiId === 'k3-256k') {
+    const labels: Record<string, string> = {
+      k3: 'Kimi K3',
+      'kimi-k3': 'Kimi K3',
+      'k3-256k': 'Kimi K3 256K',
+      'kimi-for-coding': 'Kimi K2.7 Code',
+      'kimi-for-coding-highspeed': 'Kimi K2.7 Code HS',
+    };
+    return labels[kimiId] ?? raw;
+  }
   // Context-window suffixes like "claude-opus-5[1m]" are the same model.
   const parts = raw.toLowerCase().replace(/\[.*$/, '').split('-');
   const family = parts.findIndex((p) => MODEL_FAMILIES.includes(p));
@@ -331,13 +357,20 @@ export function projectDirSlug(cwd: string): string {
 /** A line long enough to be corrupt rather than a real entry — give up on it. */
 const MAX_LINE_BYTES = 8 * 1024 * 1024;
 
+/** A transcript tree to watch: Claude project dirs or Kimi session dirs. */
+export interface ScanRoot {
+  dir: string;
+  kind: 'claude' | 'kimi';
+}
+
 export class TokenScanner {
   private files = new Map<string, FileState>();
   /**
    * `messageId:requestId` of every counted entry. A single assistant message
    * is written once per content block (and copied wholesale into forked
    * sessions), each copy repeating the same cumulative usage — counting them
-   * all would roughly double every number.
+   * all would roughly double every number. (Kimi records have no message id;
+   * their wire files are append-only, so the byte offset is the dedup.)
    */
   private keys = new Set<string>();
   private retired = new Map<string, AgentModelTotals>();
@@ -347,11 +380,13 @@ export class TokenScanner {
   private scanning = false;
   /** The user's Claude Code model selection, for sizing the context gauge. */
   private modelSelection: string | null = null;
+  private roots: ScanRoot[];
 
   constructor(
-    private root: string,
+    roots: ScanRoot[],
     state?: PersistedTokenState | PersistedTokenStateV2 | PersistedTokenStateV1,
   ) {
+    this.roots = roots;
     // Pre-v3 states predate the model/agent splits: their numbers are still
     // exact, they just land under "model unknown" / "agent unknown".
     if (state && (state.version === 1 || state.version === 2 || state.version === 3)) {
@@ -398,7 +433,29 @@ export class TokenScanner {
     if (this.scanning) return;
     this.scanning = true;
     try {
-      const { files, dirs } = await this.listFiles();
+      const files: string[] = [];
+      const dirs = new Set<string>();
+      for (const root of this.roots) {
+        const found = root.kind === 'kimi' ? await this.listKimiFiles(root.dir) : await this.listClaudeFiles(root.dir);
+        for (const f of found.files) {
+          files.push(f);
+          // Which tree the file came from decides both the parser and how its
+          // "project dir" (retirement anchor) is resolved.
+          const state = this.files.get(f);
+          if (!state) {
+            this.files.set(f, {
+              offset: 0,
+              kind: root.kind,
+              root: root.dir,
+              buckets: new Map(),
+              lastTs: new Map(),
+              lastCtx: new Map(),
+              days: new Map(),
+            });
+          }
+        }
+        for (const d of found.dirs) dirs.add(d);
+      }
       for (const file of files) {
         await this.scanFile(file);
       }
@@ -507,14 +564,14 @@ export class TokenScanner {
     return { version: 3, retired, files };
   }
 
-  /** Transcript files under project dirs that could belong to this workspace. */
-  private async listFiles(): Promise<{ files: string[]; dirs: Set<string> }> {
+  /** Transcript files under Claude project dirs that could belong to this workspace. */
+  private async listClaudeFiles(root: string): Promise<{ files: string[]; dirs: Set<string> }> {
     const files: string[] = [];
     const dirs = new Set<string>();
     const slugs = this.cwdFilters?.map((c) => projectDirSlug(c).toLowerCase()) ?? null;
     let entries: fs.Dirent[];
     try {
-      entries = await fs.promises.readdir(this.root, { withFileTypes: true });
+      entries = await fs.promises.readdir(root, { withFileTypes: true });
     } catch {
       return { files, dirs };
     }
@@ -524,7 +581,7 @@ export class TokenScanner {
       // slug starts with the workspace's — keep those too.
       const name = entry.name.toLowerCase();
       if (slugs && !slugs.some((s) => name.startsWith(s))) continue;
-      const dir = path.join(this.root, entry.name);
+      const dir = path.join(root, entry.name);
       dirs.add(dir);
       try {
         for (const item of await fs.promises.readdir(dir, { withFileTypes: true })) {
@@ -551,14 +608,65 @@ export class TokenScanner {
   }
 
   /**
+   * Kimi transcripts: `<root>/wd_<slug>_<hash>/<session>/agents/<agent>/wire.jsonl`.
+   * The workdir slug is only a prefix guess (its hash suffix can't be
+   * reproduced), so the session's own state.json has the final word on cwd.
+   */
+  private async listKimiFiles(root: string): Promise<{ files: string[]; dirs: Set<string> }> {
+    const files: string[] = [];
+    const dirs = new Set<string>();
+    const slugs =
+      this.cwdFilters?.map((c) => 'wd_' + path.basename(c).toLowerCase().replace(/\s+/g, '-') + '_') ??
+      null;
+    let entries: fs.Dirent[];
+    try {
+      entries = await fs.promises.readdir(root, { withFileTypes: true });
+    } catch {
+      return { files, dirs };
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const name = entry.name.toLowerCase();
+      if (slugs && !slugs.some((s) => name.startsWith(s))) continue;
+      const wdDir = path.join(root, entry.name);
+      dirs.add(wdDir);
+      let sessions: fs.Dirent[];
+      try {
+        sessions = await fs.promises.readdir(wdDir, { withFileTypes: true });
+      } catch {
+        continue; // directory disappeared mid-scan
+      }
+      for (const s of sessions) {
+        if (!s.isDirectory()) continue;
+        const agentsDir = path.join(wdDir, s.name, 'agents');
+        try {
+          for (const a of await fs.promises.readdir(agentsDir, { withFileTypes: true })) {
+            if (!a.isDirectory()) continue;
+            const wire = path.join(agentsDir, a.name, 'wire.jsonl');
+            try {
+              await fs.promises.access(wire);
+              files.push(wire);
+            } catch {
+              // agent dir without a wire file — nothing to read
+            }
+          }
+        } catch {
+          // session without agents/ — nothing to read
+        }
+      }
+    }
+    return { files, dirs };
+  }
+
+  /**
    * The `<root>/<slug>` project dir a transcript belongs to: its parent for a
    * top-level session file, the great-grandparent for a file nested under
-   * `<session>/subagents/`.
+   * `<session>/subagents/` or `<session>/agents/<agent>/`.
    */
   private projectDirOf(file: string): string {
     let dir = path.dirname(file);
     let parent = path.dirname(dir);
-    while (parent !== this.root && parent !== dir) {
+    while (!this.roots.some((r) => r.dir === parent) && parent !== dir) {
       dir = parent;
       parent = path.dirname(dir);
     }
@@ -595,10 +703,22 @@ export class TokenScanner {
     }
     let state = this.files.get(file);
     if (!state) {
-      state = { offset: 0, buckets: new Map(), lastTs: new Map(), lastCtx: new Map(), days: new Map() };
+      // A file scan() didn't announce (shouldn't happen) — treat as Claude.
+      state = {
+        offset: 0,
+        kind: 'claude',
+        root: this.roots[0]?.dir ?? '',
+        buckets: new Map(),
+        lastTs: new Map(),
+        lastCtx: new Map(),
+        days: new Map(),
+      };
       this.files.set(file, state);
-      // Rediscovered — its persisted copy must no longer look "vanished".
-      this.known.delete(file);
+    }
+    // Rediscovered — its persisted copy must no longer look "vanished".
+    this.known.delete(file);
+    if (state.kind === 'kimi' && state.kimiSession === undefined) {
+      await this.resolveKimiContext(file, state);
     }
     // Truncated or replaced: the offsets no longer mean anything, start over.
     if (size < state.offset) {
@@ -639,7 +759,32 @@ export class TokenScanner {
     state.offset = pending;
   }
 
+  /**
+   * Kimi wire lines carry neither cwd nor sessionId — both come from the
+   * file's location: `<root>/wd_x/<session>/agents/<agent>/wire.jsonl`, with
+   * the authoritative cwd in the sibling state.json.
+   */
+  private async resolveKimiContext(file: string, state: FileState): Promise<void> {
+    const agentDir = path.basename(path.dirname(file));
+    const sessionDir = path.dirname(path.dirname(path.dirname(file)));
+    state.kimiAgent = agentDir === 'main' ? '' : agentDir;
+    state.kimiSession = path.basename(sessionDir);
+    try {
+      const meta = JSON.parse(await fs.promises.readFile(path.join(sessionDir, 'state.json'), 'utf-8')) as {
+        cwd?: string;
+      };
+      state.kimiCwd = normalizeCwd(meta.cwd);
+    } catch {
+      // No readable state.json — the file only counts when unscoped.
+      state.kimiCwd = '';
+    }
+  }
+
   private handleLine(text: string, state: FileState): void {
+    if (state.kind === 'kimi') {
+      this.handleKimiLine(text, state);
+      return;
+    }
     if (text.indexOf('"usage"') === -1) return;
     let entry: Record<string, unknown>;
     try {
@@ -711,6 +856,90 @@ export class TokenScanner {
     // Sidechains (subagents) run their own context — only the main chain counts.
     const incoming = spend.input + spend.cacheCreate + spend.cacheRead;
     if (session && entry.isSidechain !== true && !Number.isNaN(ts) && incoming > 0) {
+      const prev = state.lastCtx.get(session);
+      if (!prev || ts >= prev.ts) {
+        state.lastCtx.set(session, { ts, tokens: incoming, model });
+      }
+    }
+  }
+
+  /**
+   * One wire.jsonl line (Kimi). Only `usage.record` carries spend; the file's
+   * cwd/session were resolved from its path once (resolveKimiContext), and
+   * `profile.bind` upgrades the agent attribution from the dir name to the
+   * profile ("explore", …) — the Kimi analogue of Claude's attributionAgent.
+   * No message ids exist here; the append-only byte offset is the dedup.
+   */
+  private handleKimiLine(text: string, state: FileState): void {
+    if (text.indexOf('"profile.bind"') !== -1) {
+      try {
+        const bind = JSON.parse(text) as { profileName?: unknown };
+        if (typeof bind.profileName === 'string' && bind.profileName && state.kimiAgent) {
+          state.kimiAgent = bind.profileName;
+        }
+      } catch {
+        // partial line — retried on the next pass
+      }
+      return;
+    }
+    if (text.indexOf('"usage"') === -1) return;
+    let entry: {
+      type?: string;
+      model?: string;
+      usage?: Record<string, number>;
+      time?: number;
+    };
+    try {
+      entry = JSON.parse(text);
+    } catch {
+      return;
+    }
+    if (entry.type !== 'usage.record' || !entry.usage || typeof entry.usage !== 'object') return;
+
+    const cwd = state.kimiCwd ?? '';
+    const session = state.kimiSession ?? '';
+    const bucketKey = `${cwd}\u0000${session}`;
+    let bucket = state.buckets.get(bucketKey);
+    if (!bucket) {
+      bucket = { cwd, session, ...emptyAgentModelTotals() };
+      state.buckets.set(bucketKey, bucket);
+    }
+    // Moonshot reports the implicit cache as read/creation splits with no
+    // write premium — cacheCreate1h stays 0 (docs/KIMI-USAGE.md §4).
+    const spend: TokenTotals = {
+      input: Number(entry.usage.inputOther ?? 0) || 0,
+      output: Number(entry.usage.output ?? 0) || 0,
+      cacheCreate: Number(entry.usage.inputCacheCreation ?? 0) || 0,
+      cacheRead: Number(entry.usage.inputCacheRead ?? 0) || 0,
+      cacheCreate1h: 0,
+    };
+    const model = typeof entry.model === 'string' ? entry.model : '';
+    addTotals(bucket.totals, spend);
+    addModel(bucket, model, spend);
+
+    const agent = state.kimiAgent ?? '';
+    const agentAcc = bucket.byAgent[agent] ?? emptyModelTotals();
+    addTotals(agentAcc.totals, spend);
+    addModel(agentAcc, model, spend);
+    bucket.byAgent[agent] = agentAcc;
+
+    const ts = Number(entry.time);
+    if (session && !Number.isNaN(ts) && ts > (state.lastTs.get(session) ?? 0)) {
+      state.lastTs.set(session, ts);
+    }
+
+    if (!Number.isNaN(ts)) {
+      const c = costUsd(model, spend);
+      if (c !== null && c > 0) {
+        const day = new Date(ts).toISOString().slice(0, 10);
+        const dayKey = `${day} ${cwd}`;
+        state.days.set(dayKey, (state.days.get(dayKey) ?? 0) + c);
+      }
+    }
+
+    // Context gauge: only the main chain's requests reflect the session window.
+    const incoming = spend.input + spend.cacheCreate + spend.cacheRead;
+    if (session && !agent && !Number.isNaN(ts) && incoming > 0) {
       const prev = state.lastCtx.get(session);
       if (!prev || ts >= prev.ts) {
         state.lastCtx.set(session, { ts, tokens: incoming, model });

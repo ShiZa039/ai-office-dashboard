@@ -9,17 +9,22 @@
  * Transcripts carry the 5m/1h split in `usage.cache_creation`; when it is
  * absent everything is priced as 5m (the cheaper assumption).
  *
- * Non-Claude models (Kimi, …) are not priced yet — they return null and are
- * simply left out of the $ figures.
+ * Kimi (Moonshot) prices the implicit cache differently: no write premium at
+ * all (writes are plain input; usage records report them as 0 anyway), reads
+ * at a per-model flat rate. Sources and the full table: docs/KIMI-USAGE.md.
  *
  * No vscode imports — unit-testable.
  */
 import { TokenTotals } from './tokenUsage';
 
-/** $ per MTok. Cache rates are derived from `input` (×1.25 / ×2 / ×0.1). */
+/** $ per MTok. Cache rates default to the Anthropic ones (×1.25 / ×2 / ×0.1). */
 export interface ModelPrice {
   input: number;
   output: number;
+  /** Explicit $/MTok cache-read rate; defaults to 0.1× input. */
+  cacheRead?: number;
+  /** Explicit $/MTok cache-write rate replacing both Anthropic TTL tiers. */
+  cacheWrite?: number;
 }
 
 const CACHE_WRITE_5M = 1.25;
@@ -51,12 +56,33 @@ function versionNumber(version: number[]): number {
 }
 
 /**
+ * List price for a Kimi transcript id ("kimi-code/k3", "kimi-for-coding", …).
+ * null when the alias is not one we have a published price for.
+ */
+function kimiPrice(raw: string): ModelPrice | null {
+  const id = raw.toLowerCase().replace(/^kimi-code\//, '');
+  if (id === 'k3' || id === 'kimi-k3' || id === 'k3-256k' || id === 'kimi-k3-256k') {
+    // Moonshot's implicit cache bills writes as plain input (no premium) and
+    // reads at a flat $0.30 — docs/KIMI-USAGE.md §4.
+    return { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3 };
+  }
+  if (id === 'kimi-for-coding' || id === 'kimi-k2.7-code') {
+    return { input: 0.95, output: 4, cacheRead: 0.19, cacheWrite: 0.95 };
+  }
+  if (id === 'kimi-for-coding-highspeed' || id === 'kimi-k2.7-code-highspeed') {
+    // No published cache-read rate — fall back to the 0.1× convention.
+    return { input: 1.9, output: 8, cacheWrite: 1.9 };
+  }
+  return null;
+}
+
+/**
  * List price for a raw transcript model id; null when we have no price we can
- * trust (non-Claude ids, or nothing recognizable).
+ * trust (nothing recognizable).
  */
 export function priceForModel(raw: string): ModelPrice | null {
   const id = parseClaudeId(raw);
-  if (!id) return null;
+  if (!id) return kimiPrice(raw);
   const v = versionNumber(id.version);
   switch (id.family) {
     case 'fable':
@@ -110,8 +136,10 @@ export function costPartsUsd(raw: string, t: TokenTotals): CostParts | null {
   const input = (t.input * price.input) / 1e6;
   const output = (t.output * price.output) / 1e6;
   const cacheWrite =
-    (cache5m * price.input * CACHE_WRITE_5M + cache1h * price.input * CACHE_WRITE_1H) / 1e6;
-  const cacheRead = (t.cacheRead * price.input * CACHE_READ) / 1e6;
+    price.cacheWrite !== undefined
+      ? (t.cacheCreate * price.cacheWrite) / 1e6
+      : (cache5m * price.input * CACHE_WRITE_5M + cache1h * price.input * CACHE_WRITE_1H) / 1e6;
+  const cacheRead = (t.cacheRead * (price.cacheRead ?? price.input * CACHE_READ)) / 1e6;
   return { input, output, cacheWrite, cacheRead, total: input + output + cacheWrite + cacheRead };
 }
 
@@ -171,13 +199,22 @@ export interface ContextWindowHint {
  * Best-effort context-window size for the session gauge. Claude Code runs at
  * 200K unless the 1M context is on: explicitly (the `[1m]` id suffix), by the
  * user's model selection, or provably (a prompt that already exceeds 200K).
- * Fable and Mythos are 1M-only models. Unknown (non-Claude) ids get null — no
- * gauge.
+ * Fable and Mythos are 1M-only models. Kimi windows are fixed per model alias
+ * (k3 → 1M, the rest → 256K — docs/KIMI-USAGE.md §4). Unknown ids get null —
+ * no gauge.
  */
 export function contextWindowTokens(raw: string, hint?: ContextWindowHint): number | null {
   const lower = raw.toLowerCase();
   const id = parseClaudeId(raw);
-  if (!id) return null;
+  if (!id) {
+    // Kimi: the window is fixed per model alias — k3 runs at 1M (its
+    // llm.request records maxTokens 1048576), the 256K variants and the
+    // coding models at 262K. docs/KIMI-USAGE.md §4.
+    if (lower.includes('k3-256k')) return 262_144;
+    if (/(^|\/)k3$|kimi-k3/.test(lower)) return 1_000_000;
+    if (lower.includes('kimi-for-coding') || lower.includes('k2.7-code')) return 262_144;
+    return null;
+  }
   if (lower.includes('[1m]')) return 1_000_000;
   if (id.family === 'fable' || id.family === 'mythos') return 1_000_000;
   const selection = hint?.selection ?? '';

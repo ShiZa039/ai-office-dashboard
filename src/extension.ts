@@ -611,9 +611,15 @@ export function activate(context: vscode.ExtensionContext) {
 
   const startTokenWatcher = () => {
     stopTokenWatcher();
-    const root = path.join(os.homedir(), '.claude', 'projects');
+    const roots = [
+      { dir: path.join(os.homedir(), '.claude', 'projects'), kind: 'claude' as const },
+      {
+        dir: path.join(process.env.KIMI_CODE_HOME ?? path.join(os.homedir(), '.kimi-code'), 'sessions'),
+        kind: 'kimi' as const,
+      },
+    ];
     const scanner = new TokenScanner(
-      root,
+      roots,
       context.workspaceState.get<PersistedTokenState>(TOKEN_STATE_KEY),
     );
     scanner.setCwdFilter(currentCwdFilter());
@@ -645,7 +651,7 @@ export function activate(context: vscode.ExtensionContext) {
         if (firstPass) {
           firstPass = false;
           log.appendLine(
-            `AI Office: tokens — ${Object.keys(state.files).length} transcripts scanned under ${root}`,
+            `AI Office: tokens — ${Object.keys(state.files).length} transcripts scanned under ${roots.length} roots`,
           );
         }
       } catch (err) {

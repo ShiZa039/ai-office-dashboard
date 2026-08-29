@@ -1,6 +1,6 @@
 # Roadmap — AI Office
 
-История релизов и план развития. Текущая версия — `v0.19.0`.
+История релизов и план развития. Текущая версия — `v0.20.1`.
 
 > This file is maintained in Russian only (internal dev history). User-facing docs are bilingual: [README.md](README.md) / [README.ru.md](README.ru.md), [INSTALL.md](INSTALL.md) / [INSTALL.ru.md](INSTALL.ru.md).
 

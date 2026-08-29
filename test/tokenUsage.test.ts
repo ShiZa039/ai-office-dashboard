@@ -123,7 +123,7 @@ async function main(): Promise<void> {
     entry({ session: 'aaaa-1111', id: 'm2', input: 5, output: 50, cacheCreate: 0, cacheRead: 400 }),
   );
 
-  const scanner = new TokenScanner(root);
+  const scanner = new TokenScanner([{ dir: root, kind: 'claude' }]);
   scanner.setCwdFilter([cwd]);
   await scanner.scan();
 
@@ -290,7 +290,7 @@ async function main(): Promise<void> {
   const state = scanner.getState();
   fs.rmSync(sessionB);
 
-  const revived = new TokenScanner(root, state);
+  const revived = new TokenScanner([{ dir: root, kind: 'claude' }], state);
   revived.setCwdFilter([cwd]);
   await revived.scan();
   assert.strictEqual(
@@ -331,7 +331,7 @@ async function main(): Promise<void> {
     },
   };
 
-  const scoped = new TokenScanner(root, shared);
+  const scoped = new TokenScanner([{ dir: root, kind: 'claude' }], shared);
   scoped.setCwdFilter([cwd]);
   await scoped.scan();
   assert.strictEqual(
@@ -374,7 +374,7 @@ async function main(): Promise<void> {
     }),
   );
 
-  const subScanner = new TokenScanner(root);
+  const subScanner = new TokenScanner([{ dir: root, kind: 'claude' }]);
   subScanner.setCwdFilter([subCwd]);
   await subScanner.scan();
   let subSnap = subScanner.snapshot(subSession);
@@ -412,7 +412,7 @@ async function main(): Promise<void> {
 
   const subState = subScanner.getState();
   fs.rmSync(path.join(subDir, subSession), { recursive: true });
-  const subRevived = new TokenScanner(root, subState);
+  const subRevived = new TokenScanner([{ dir: root, kind: 'claude' }], subState);
   subRevived.setCwdFilter([subCwd]);
   await subRevived.scan();
   subSnap = subRevived.snapshot(null);
@@ -443,7 +443,7 @@ async function main(): Promise<void> {
     },
   } as unknown as PersistedTokenState;
 
-  const migrated = new TokenScanner(root, legacy);
+  const migrated = new TokenScanner([{ dir: root, kind: 'claude' }], legacy);
   migrated.setCwdFilter([legacyCwd]);
   await migrated.scan(); // the v1 file is gone from disk, so it retires now
   const migratedSnap = migrated.snapshot(null);
@@ -462,14 +462,14 @@ async function main(): Promise<void> {
   // --- an unusable persisted state is ignored rather than fatal ---
 
   const bogus = { version: 7, retired: {}, files: {} } as unknown as PersistedTokenState;
-  const clean = new TokenScanner(root, bogus);
+  const clean = new TokenScanner([{ dir: root, kind: 'claude' }], bogus);
   clean.setCwdFilter([cwd]);
   await clean.scan();
   assert.strictEqual(clean.snapshot(null).total.output, 3, 'unknown state version discarded');
 
   // --- no filter counts every project ---
 
-  const global = new TokenScanner(root);
+  const global = new TokenScanner([{ dir: root, kind: 'claude' }]);
   await global.scan();
   // 3 (sessionA) + 999 (other project) + 100 (the subagent project's main
   // file — its session dir was pruned above, so only that file is on disk).
@@ -479,6 +479,100 @@ async function main(): Promise<void> {
     emptyTotals(),
     { input: 0, output: 0, cacheCreate: 0, cacheRead: 0, cacheCreate1h: 0 },
     'emptyTotals is zeroed',
+  );
+
+  // --- Kimi transcripts (docs/KIMI-USAGE.md): wire.jsonl per agent dir ---
+
+  const kimiRoot = path.join(tmp, 'kimi-sessions');
+  const kimiCwd = path.join(tmp, 'work', 'kimiapp');
+  const kimiSessionDir = path.join(kimiRoot, 'wd_kimiapp_abcdef123456', 'session_kimi-1');
+  fs.mkdirSync(path.join(kimiSessionDir, 'agents', 'main'), { recursive: true });
+  fs.mkdirSync(path.join(kimiSessionDir, 'agents', 'agent-0'), { recursive: true });
+  fs.mkdirSync(path.join(kimiRoot, 'wd_elsewhere_999999999999', 'session_x', 'agents', 'main'), {
+    recursive: true,
+  });
+  fs.writeFileSync(
+    path.join(kimiSessionDir, 'state.json'),
+    JSON.stringify({ id: 'session_kimi-1', cwd: kimiCwd }),
+  );
+
+  let kimiClock = Date.parse('2026-08-29T10:00:00.000Z');
+  const kimiUsage = (model: string, input: number, output: number, cacheRead: number): string =>
+    JSON.stringify({
+      type: 'usage.record',
+      model,
+      usage: { inputOther: input, output, inputCacheRead: cacheRead, inputCacheCreation: 0 },
+      usageScope: 'turn',
+      time: (kimiClock += 1000),
+    }) + '\n';
+
+  write(
+    path.join(kimiSessionDir, 'agents', 'main', 'wire.jsonl'),
+    JSON.stringify({ type: 'profile.bind', agentId: 'main', profileName: 'agent' }) + '\n',
+    kimiUsage('kimi-code/k3', 100, 10, 1000),
+  );
+  write(
+    path.join(kimiSessionDir, 'agents', 'agent-0', 'wire.jsonl'),
+    JSON.stringify({ type: 'profile.bind', agentId: 'agent-0', profileName: 'explore' }) + '\n',
+    kimiUsage('kimi-code/kimi-for-coding', 50, 5, 500),
+  );
+  write(
+    path.join(kimiRoot, 'wd_elsewhere_999999999999', 'session_x', 'agents', 'main', 'wire.jsonl'),
+    kimiUsage('kimi-code/k3', 999, 999, 0),
+  );
+
+  const kimiScanner = new TokenScanner([
+    { dir: root, kind: 'claude' },
+    { dir: kimiRoot, kind: 'kimi' },
+  ]);
+  kimiScanner.setCwdFilter([kimiCwd]);
+  await kimiScanner.scan();
+  const kimiSnap = kimiScanner.snapshot('session_kimi-1');
+  assert.strictEqual(kimiSnap.total.output, 15, 'kimi wire usage is counted');
+  assert.strictEqual(kimiSnap.session?.totals.input, 150, 'session slice: main + subagent');
+  assert.strictEqual(
+    kimiSnap.session?.context?.tokens,
+    1100,
+    'the context gauge follows the kimi main chain only',
+  );
+  assert.strictEqual(kimiSnap.session?.context?.window, 1_000_000, 'k3 is a 1M model');
+  assert.strictEqual(
+    kimiSnap.byAgent.find((a) => a.agent === 'explore')?.totals.output,
+    5,
+    'the kimi subagent is attributed via its profile.bind profileName',
+  );
+  assert.strictEqual(
+    kimiSnap.byModel.find((m) => m.model === 'Kimi K3')?.totals.input,
+    100,
+    'kimi-code/k3 gets a display label',
+  );
+  assert.strictEqual(
+    kimiSnap.byModel.find((m) => m.model === 'Kimi K3')?.costUsd,
+    (100 * 3 + 10 * 15 + 1000 * 0.3) / 1e6,
+    'k3 priced at $3/$15/$0.30 per MTok',
+  );
+  // The other workdir's session is out of scope for this filter.
+  assert.ok(
+    !kimiSnap.byModel.some((m) => m.totals.output === 999),
+    'other workdirs stay out of a filtered scan',
+  );
+
+  // A pruned kimi session retires its tokens instead of dropping them.
+  const kimiState = kimiScanner.getState();
+  fs.rmSync(kimiSessionDir, { recursive: true });
+  const kimiRevived = new TokenScanner(
+    [
+      { dir: root, kind: 'claude' },
+      { dir: kimiRoot, kind: 'kimi' },
+    ],
+    kimiState,
+  );
+  kimiRevived.setCwdFilter([kimiCwd]);
+  await kimiRevived.scan();
+  assert.strictEqual(
+    kimiRevived.snapshot(null).total.output,
+    15,
+    'pruned kimi sessions retire, not vanish',
   );
 
   fs.rmSync(tmp, { recursive: true, force: true });
