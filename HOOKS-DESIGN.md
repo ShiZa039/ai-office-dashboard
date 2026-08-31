@@ -7,9 +7,13 @@ Claude Code и Kimi Code: хук-скрипты `hooks/emit-agent-event.py` и
 `src/hookConfig.ts` и `src/hookConfigKimi.ts`, схема событий JSONL и логика
 аварийной остановки `stop_gate`.
 
-> Актуализировано 2026-08-02: новый текст `STOP_REASON` (handoff-заметка),
-> уравнены BOM-терпимость и верхнеуровневая обработка ошибок в обоих
-> скриптах, добавлен интеграционный тест `test/emitAgentEventPy.test.ts`.
+> Актуализировано 2026-08-31 (v0.21.0): у флага остановки появились поля
+> `since`/`until` и протухание (§8), в карту файлов добавлены `src/stopFlag.ts`,
+> `src/autoStop.ts` и wiring-тест, сверены объёмы скриптов и таблица паритета.
+>
+> Ранее (2026-08-02): новый текст `STOP_REASON` (handoff-заметка), уравнены
+> BOM-терпимость и верхнеуровневая обработка ошибок в обоих скриптах,
+> добавлен интеграционный тест `test/emitAgentEventPy.test.ts`.
 
 ## 1. Общая картина
 
@@ -60,12 +64,15 @@ Claude Code и Kimi Code: хук-скрипты `hooks/emit-agent-event.py` и
 
 | Файл | Роль |
 |------|------|
-| `hooks/emit-agent-event.py` | Python-вариант хук-скрипта (288 строк) |
-| `hooks/emit-agent-event.js` | Node-вариант хук-скрипта (321 строка) |
+| `hooks/emit-agent-event.py` | Python-вариант хук-скрипта (310 строк) |
+| `hooks/emit-agent-event.js` | Node-вариант хук-скрипта (337 строк) |
 | `src/hookConfig.ts` | Чистая логика регистрации хуков в `~/.claude/settings.json` |
 | `src/hookConfigKimi.ts` | Чистая логика регистрации хуков в `~/.kimi-code/config.toml` |
 | `src/hookInstaller.ts` | Файловый/UI-клей: копирование скриптов, выбор рантайма, запись конфигов |
+| `src/stopFlag.ts` | Формат, мерж и снятие флагов остановки на стороне расширения (парная реализация к `stop_flag_path` / `stopFlagPath` в скриптах) |
+| `src/autoStop.ts` | Разовый предохранитель: решает, когда снимок лимитов плана должен сам взвести флаг остановки |
 | `test/hookConfig.test.ts`, `test/hookConfigKimi.test.ts`, `test/emitAgentEvent.test.ts`, `test/stopFlag.test.ts` | Юнит-тесты логики регистрации и скриптов |
+| `test/hookWiring.test.ts` | Wiring-гейт: `event_type` скриптов ⊆ регистрации обоих CLI ⊆ события `src/types.ts` (`gotcha-green-modules-dead-system`) |
 | `test/emitAgentEventPy.test.ts` | Интеграционный тест Python-скрипта: порт сценариев `emitAgentEvent.test.ts`, прогоняет реальный `emit-agent-event.py`; пропускается, если Python 3 не найден в PATH |
 
 Оба `hookConfig*.ts` намеренно не импортируют `vscode` — это чистые функции,
@@ -328,7 +335,9 @@ timeout = 5
 ```json
 {
   "active": true,
-  "cwds": ["D:/project-a", "D:/project-b"]
+  "cwds": ["D:/project-a", "D:/project-b"],
+  "since": "2026-08-14T09:12:00.000Z",
+  "until": "2026-08-14T14:00:00.000Z"
 }
 ```
 
@@ -336,6 +345,15 @@ timeout = 5
   (`load_stop_flag` / `loadStopFlag` возвращает `None`/`null`).
 - `cwds` — список проектов, к которым применяется стоп. Пустой или
   отсутствующий список означает **глобальный** стоп (все сессии).
+- `since` — когда стоп взведён; справочное поле для UI.
+- `until` — срок годности флага (ISO). Его ставит **автостоп**, записывая
+  туда время сброса сработавшего лимита: вчерашняя остановка по квоте не
+  должна блокировать сегодняшнюю сессию. Ручная остановка `until` не несёт
+  и не протухает никогда. Скрипты считают протухший флаг снятым
+  (`stop_flag_expired` / `stopFlagExpired`), а расширение заодно удаляет
+  файл. Непарсящийся `until` не протухает — fail-closed в пользу стопа.
+  Мерж двух стопов никогда не укорачивает срок: у ручного (`until: null`)
+  он бесконечен и побеждает.
 
 ### Гейт (`handle_stop_gate` / `stopGate`)
 
@@ -416,7 +434,8 @@ timeout = 5
 |---|---|---|
 | `claude_stop_flag_path()` / `kimi_stop_flag_path()` | `claudeStopFlagPath()` / `kimiStopFlagPath()` | Пути к файлам-флагам стопа |
 | `stop_flag_path()` / `all_stop_flag_paths()` | `stopFlagPath()` / `allStopFlagPaths()` | Флаг «этого» CLI / все флаги |
-| `load_stop_flag(path)` | `loadStopFlag(path)` | Чтение активного флага; `None`/`null` при отсутствии/битости |
+| `stop_flag_expired(flag)` | `stopFlagExpired(flag)` | Протух ли `until` флага (см. §8) |
+| `load_stop_flag(path)` | `loadStopFlag(path)` | Чтение активного флага; `None`/`null` при отсутствии/битости, протухший — как отсутствующий |
 | — (внутри `normcase/normpath`) | `normPath(p)` | Нормализация путей (в Node вынесена отдельно) |
 | `stop_covers_cwd(flag, cwd)` | `stopCoversCwd(flag, cwd)` | Покрывает ли флаг данный cwd |
 | `handle_stop_gate()` | `stopGate(raw)` | PreToolUse-денай |
@@ -472,12 +491,15 @@ timeout = 5
 
 - Приёмная сторона JSONL: `src/eventWatcher.ts` (слежение за файлом),
   `src/eventParser.ts` (разбор событий в модель агентов).
-- Кто создаёт `office-stop.json`: логика кнопки «стоп» на дашборде
-  (вебвью `media/office.js` + обработчик в `src/extension.ts`).
+- Кто создаёт `office-stop.json`: `src/stopFlag.ts` (формат, мерж, пути) —
+  вызывается из обработчика кнопки «стоп» в `src/extension.ts` (вебвью
+  `media/office.js` лишь шлёт сообщение) и из `src/autoStop.ts`, когда
+  предохранитель срабатывает по лимитам плана.
 - Тесты: `test/emitAgentEvent.test.ts`, `test/stopFlag.test.ts` (скрипты и
-  стоп-флаги), `test/hookConfig.test.ts`, `test/hookConfigKimi.test.ts`
-  (мержи регистраций), `test/emitAgentEventPy.test.ts` (интеграционный прогон
-  Python-скрипта).
+  стоп-флаги), `test/autoStop.test.ts` (предохранитель по лимитам),
+  `test/hookConfig.test.ts`, `test/hookConfigKimi.test.ts`
+  (мержи регистраций), `test/hookWiring.test.ts` (покрытие событий),
+  `test/emitAgentEventPy.test.ts` (интеграционный прогон Python-скрипта).
 - Паритет py/js страхуется тестами: `emitAgentEvent.test.ts` прогоняет
   Node-вариант, а `emitAgentEventPy.test.ts` повторяет те же сценарии против
   Python-варианта — расхождение поведения двух реализаций ловится на CI

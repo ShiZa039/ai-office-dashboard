@@ -21,12 +21,16 @@
 - `src/extension.ts` — точка входа, команды, вебвью-провайдер.
 - `src/hookConfig.ts` / `src/hookConfigKimi.ts` — чистая логика регистрации хуков (без `vscode`); клей с ФС/UI — `src/hookInstaller.ts`.
 - `src/subscriptionUsage.ts` / `src/kimiUsage.ts` — OAuth-пробы квот планов (Claude/Kimi), 429-backoff; `src/usagePace.ts` — pace-модель (burn rate vs окно). Протоколы и боевой опыт: `docs/USAGE-PROVIDERS.md`.
+- `src/tokenUsage.ts` — счётчики токенов из транскриптов обоих CLI (`~/.claude/projects`, `~/.kimi-code/sessions`), сплиты по моделям и субагентам, контекст сессии. Формат Kimi-транскриптов: `docs/KIMI-USAGE.md`.
+- `src/pricing.ts` — цены моделей и разбивка стоимости; `src/modelSelection.ts` — выбор модели пользователем (единственный источник маркера 1M-контекста, транскрипт его не несёт).
+- `src/stopFlag.ts` — формат и мерж флагов `office-stop.json` (расширенческая сторона); `src/autoStop.ts` — разовый предохранитель по лимитам плана.
 - `hooks/emit-agent-event.{py,js}` — хук-скрипты, эмитят события в `~/.claude/agent-events.jsonl`; гейт аварийной остановки (`stop_gate`).
 - `src/eventWatcher.ts` + `src/eventParser.ts` — приёмная сторона JSONL.
 - `src/agentState.ts` / `src/agentRoster.ts` / `src/agentDetail.ts` — модель агентов на дашборде.
-- `media/office.{html,js,css}` — вебвью (ванильный JS, строки UI — только через `package.nls*.json`).
-- Глубокий разбор хуков: `HOOKS-DESIGN.md`. Триаж литании: `docs/ADR-0001-litany-triage.md`. Грабли: `docs/gotchas.md`.
-- Порог-ориентир: файл за 400 строк — кандидат на наблюдение в этой карте; проверка: `wc -l src/*.ts media/*.js media/*.css hooks/* | sort -n` (`gotcha-god-files`).
+- `src/locale.ts` — язык UI; `src/usageWatcher.ts` — опциональные $-бары через `ccusage` (Claude-only); `src/repoLink.ts` — строка версии/ссылки/лицензии в подвале из `package.json`.
+- `media/office.{html,js,css}` — вебвью (ванильный JS, строки UI — только через `package.nls*.json`); `media/icons.js` / `media/avatars.js` — доверенные реестры SVG; хост-сторона — `src/webview/provider.ts`.
+- Глубокий разбор хуков: `HOOKS-DESIGN.md`. Вебвью: `UI-REVIEW.md`. Архитектура: `ARCH-REVIEW.md`. Тесты: `TEST-ANALYSIS.md`. Триаж литании: `docs/ADR-0001-litany-triage.md`. Грабли: `docs/gotchas.md`.
+- Порог-ориентир: файл за 400 строк — кандидат на наблюдение в этой карте; проверка: `wc -l src/*.ts media/*.js media/*.css hooks/* | sort -n` (`gotcha-god-files`). Сейчас порог перешагнули `media/office.js`, `media/office.css`, `src/tokenUsage.ts` и `src/extension.ts` — разбиение не начато осознанно, но каждый новый крупный кусок логики выносится отдельным модулем, а не дописывается в них.
 
 ## Работа с агентом
 

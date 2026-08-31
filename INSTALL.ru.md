@@ -24,12 +24,12 @@
    ```powershell
    # Windows
    & 'C:\Users\<user>\AppData\Local\Programs\Microsoft VS Code\bin\code.cmd' `
-     --install-extension 'D:\path\to\ai-office-dashboard-0.16.0.vsix' --force
+     --install-extension 'D:\path\to\ai-office-dashboard-0.21.0.vsix' --force
    ```
 
    ```bash
    # Linux/macOS
-   code --install-extension /path/to/ai-office-dashboard-0.16.0.vsix --force
+   code --install-extension /path/to/ai-office-dashboard-0.21.0.vsix --force
    ```
 
 2. `Ctrl+Shift+P` → **Developer: Reload Window**.
@@ -51,14 +51,20 @@
 
 ### Панель Plan usage (лимиты подписки)
 
-Работает из коробки, если ты залогинен в Claude Code по подписке Pro/Max: расширение читает OAuth-токен из `~/.claude/.credentials.json` (macOS — Keychain) и опрашивает тот же эндпоинт, что и команда `/usage` в Claude Code. Показывает:
+Работает из коробки для **обоих CLI** — у каждого провайдера своя группа баров, достаточно быть залогиненным.
+
+Claude Code (подписка Pro/Max): расширение читает OAuth-токен из `~/.claude/.credentials.json` (macOS — Keychain) и опрашивает тот же эндпоинт, что и команда `/usage`. Показывает:
 
 - **Session (5h)** — процент 5-часового окна + когда сбросится;
 - **Week (all)** — недельный лимит по всем моделям;
 - **Week (Opus)** — недельный лимит Opus (только Max-планы);
 - бейдж плана (Pro / Max).
 
-Токен используется только для запроса к `api.anthropic.com` и никуда больше не передаётся. Эта панель (как и $-бары ccusage ниже) — только для Claude Code: у Kimi нет эквивалентного локального API.
+Kimi Code: токен берётся из `~/.kimi-code/credentials/` (или `$KIMI_CODE_HOME/credentials/`), лимиты — из API Kimi Code: сессионное окно (5 часов, как и у Claude) и недельная квота, бейдж — уровень плана. Токены Kimi живут около 15 минут и обновляются самим CLI, так что устаревшая панель обычно означает лишь, что Kimi Code давно не запускался.
+
+На каждом баре — тик равномерного темпа, а если лимит идёт к 100% раньше сброса окна, появляется строка прогноза. Токены используются только для запросов к API самих провайдеров (`api.anthropic.com` / `api.kimi.com`) и никуда больше не передаются. $-бары ccusage ниже — только для Claude Code.
+
+Рядом: **автостоп** (`aiOffice.autoStop.*`) умеет сам взводить аварийную остановку, когда лимит переваливает порог — см. раздел про экстренную остановку в README.
 
 Если работаешь по API-ключу (без подписки) — лимитов нет; можно включить $-оценки расхода:
 
@@ -80,7 +86,7 @@
 В большинстве случаев **ничего настраивать не нужно**:
 
 - дашборд фильтрует события по `cwd` текущего workspace (`aiOffice.scope = workspace` по умолчанию);
-- агенты проекта из `.claude/agents/**/*.md` показываются сразу как idle-фигурки (`aiOffice.roster.enabled`);
+- агенты проекта из `.claude/agents/`, `.kimi-code/agents/` и `.agents/agents/` (`**/*.md`) показываются сразу как idle-фигурки (`aiOffice.roster.enabled`);
 - комната выбирается keyword-эвристикой по имени агента (`react-*` → frontend, `*-director` → directors, `mqtt/esp32` → iot и т.д.).
 
 Кастомизация нужна, только если эвристика промахивается.
@@ -89,7 +95,7 @@
 
 Известные комнаты: `directors`, `backend`, `frontend`, `qa`, `security`, `devops`, `integrations`, `ai-lab`, `iot`, `lobby`.
 
-Вариант 1 — файл в проекте `.claude/office-rooms.json` (коммитится с репо, высший приоритет):
+Вариант 1 — файл в проекте `.claude/office-rooms.json` (или `.kimi-code/office-rooms.json`) — коммитится с репо, высший приоритет; если оба файла называют одного агента, побеждает запись из `.kimi-code`:
 
 ```json
 {
@@ -109,7 +115,7 @@
 }
 ```
 
-Приоритет: **`.claude/office-rooms.json` > `aiOffice.agentRooms` > встроенные агенты Claude Code > эвристика > лобби**. Изменения подхватываются на лету.
+Приоритет: **`office-rooms.json` в проекте > `aiOffice.agentRooms` > встроенные агенты Claude Code > эвристика > лобби**. Изменения подхватываются на лету.
 
 ### Отключить per-window изоляцию
 
@@ -182,10 +188,14 @@ tail -5 ~/.claude/agent-events.jsonl                                 # Linux/mac
 | События приходят, но не отображаются | Cwd-фильтр режет всё | В Output (`View → Output → AI Office`) строка `cwd filter`; для проверки поставь `aiOffice.scope = global` |
 | Агент всегда в Лобби | Имя не подходит под эвристику | Добавь в `.claude/office-rooms.json` или `aiOffice.agentRooms` |
 | Plan usage: `no Claude Code login found` | Нет `~/.claude/.credentials.json` | Залогинься в Claude Code (`claude` → login по подписке) |
+| Plan usage: нет группы Kimi | Не залогинен в Kimi Code или протух токен | Выполни `/login` в Kimi Code; креды лежат в `~/.kimi-code/credentials/` |
 | Plan usage: устаревшие данные | Токен протух | Истечение теперь молчаливое — запусти любую сессию Claude Code, токен обновится сам |
 | Plan usage: `HTTP 429` | Рейт-лимит эндпоинта | Само пройдёт; можно увеличить `usage.pollSeconds` |
 | Кириллица в `task` ломается | Старый `emit-agent-event.py` | Хук-скрипты обновляются автоматически при `hooks.autoSetup = true`; иначе переустанови хуки командой |
 | 🛑 не блокирует агентов | `PreToolUse`-хук не зарегистрирован (старый набор хуков) | **AI Office: Install Agent Hooks** — недостающие события домерджатся |
+| Счётчики токенов стоят на `—` | Под `cwd` рабочей папки ещё нет транскриптов | Отправь один промпт в CLI; у Kimi каталог сессии появится в `~/.kimi-code/sessions/` |
+| Пустая колонка стоимости у какой-то модели | Для её id нет опубликованной цены | Известные модели Claude и Kimi оцениваются, остальные исключаются, а не считаются нулём |
+| Агенты остановились сами | Сработал автостоп по лимиту плана | Ожидаемо при ≥95% окна; нажми «Продолжить» или выключи через `aiOffice.autoStop.enabled = false` |
 | Инструменты блокируются, хотя остановку не включал | Остался флаг остановки | Нажми «Продолжить» на дашборде, отправь новый промпт или удали `~/.claude/office-stop.json` и `~/.kimi-code/office-stop.json` |
 
 ---

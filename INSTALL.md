@@ -24,12 +24,12 @@ The extension visualizes Claude Code and Kimi Code CLI subagent activity as an "
    ```powershell
    # Windows
    & 'C:\Users\<user>\AppData\Local\Programs\Microsoft VS Code\bin\code.cmd' `
-     --install-extension 'D:\path\to\ai-office-dashboard-0.16.0.vsix' --force
+     --install-extension 'D:\path\to\ai-office-dashboard-0.21.0.vsix' --force
    ```
 
    ```bash
    # Linux/macOS
-   code --install-extension /path/to/ai-office-dashboard-0.16.0.vsix --force
+   code --install-extension /path/to/ai-office-dashboard-0.21.0.vsix --force
    ```
 
 2. `Ctrl+Shift+P` → **Developer: Reload Window**.
@@ -51,14 +51,20 @@ By default (`auto`) hooks are installed into every CLI whose home directory exis
 
 ### Plan usage panel (subscription limits)
 
-Works out of the box if you are logged into Claude Code with a Pro/Max subscription: the extension reads the OAuth token from `~/.claude/.credentials.json` (Keychain on macOS) and polls the same endpoint the `/usage` command in Claude Code uses. It shows:
+Works out of the box for **both CLIs** — each provider gets its own group of bars, and you only need to be logged in.
+
+Claude Code (Pro/Max subscription): the extension reads the OAuth token from `~/.claude/.credentials.json` (Keychain on macOS) and polls the same endpoint the `/usage` command uses. It shows:
 
 - **Session (5h)** — percentage of the 5-hour window + when it resets;
 - **Week (all)** — the weekly limit across all models;
 - **Week (Opus)** — the weekly Opus limit (Max plans only);
 - a plan badge (Pro / Max).
 
-The token is used only for the request to `api.anthropic.com` and is never sent anywhere else. This panel (like the ccusage $-bars below) is Claude Code only — Kimi Code has no equivalent local API.
+Kimi Code: the token comes from `~/.kimi-code/credentials/` (or `$KIMI_CODE_HOME/credentials/`) and the limits from the Kimi Code API — a session window (5 hours, same as Claude's) and a weekly quota, with the plan level as the badge. Kimi tokens live about 15 minutes and the CLI refreshes them itself, so a stale panel usually just means Kimi Code has not run for a while.
+
+Each bar carries a burn-pace tick and, when a limit is heading for 100% before its window resets, a forecast line. Tokens are used only for requests to the providers' own APIs (`api.anthropic.com` / `api.kimi.com`) and are never sent anywhere else. The ccusage $-bars below are Claude Code only.
+
+Related: **auto-stop** (`aiOffice.autoStop.*`) can trip the emergency stop by itself when a limit crosses the threshold — see the README section on the emergency stop.
 
 If you work with an API key (no subscription) there are no limits; you can enable $-cost estimates instead:
 
@@ -80,7 +86,7 @@ If you work with an API key (no subscription) there are no limits; you can enabl
 In most cases **no configuration is needed**:
 
 - the dashboard filters events by the current workspace `cwd` (`aiOffice.scope = workspace` by default);
-- project agents from `.claude/agents/**/*.md` show up immediately as idle figures (`aiOffice.roster.enabled`);
+- project agents from `.claude/agents/`, `.kimi-code/agents/` and `.agents/agents/` (`**/*.md`) show up immediately as idle figures (`aiOffice.roster.enabled`);
 - the room is picked by keyword heuristics on the agent name (`react-*` → frontend, `*-director` → directors, `mqtt/esp32` → iot, etc.).
 
 Customization is only needed when the heuristics miss.
@@ -89,7 +95,7 @@ Customization is only needed when the heuristics miss.
 
 Known rooms: `directors`, `backend`, `frontend`, `qa`, `security`, `devops`, `integrations`, `ai-lab`, `iot`, `lobby`.
 
-Option 1 — a `.claude/office-rooms.json` file in the project (committed with the repo, highest priority):
+Option 1 — a `.claude/office-rooms.json` (or `.kimi-code/office-rooms.json`) file in the project (committed with the repo, highest priority; when both files name the same agent, the `.kimi-code` entry wins):
 
 ```json
 {
@@ -109,7 +115,7 @@ Option 2 — VSCode settings (`Ctrl+,` → Workspace → `aiOffice.agentRooms`):
 }
 ```
 
-Priority: **`.claude/office-rooms.json` > `aiOffice.agentRooms` > built-in Claude Code agents > heuristics > lobby**. Changes are picked up on the fly.
+Priority: **`office-rooms.json` in the project > `aiOffice.agentRooms` > built-in Claude Code agents > heuristics > lobby**. Changes are picked up on the fly.
 
 ### Disabling per-window isolation
 
@@ -182,10 +188,14 @@ tail -5 ~/.claude/agent-events.jsonl                                 # Linux/mac
 | Events arrive but nothing shows | The cwd filter drops everything | Look for the `cwd filter` line in Output (`View → Output → AI Office`); to test, set `aiOffice.scope = global` |
 | An agent always lands in the Lobby | Its name doesn't match the heuristics | Add it to `.claude/office-rooms.json` or `aiOffice.agentRooms` |
 | Plan usage: `no Claude Code login found` | No `~/.claude/.credentials.json` | Log into Claude Code (`claude` → subscription login) |
+| Plan usage: no Kimi group | Not logged into Kimi Code, or its token expired | Run `/login` in Kimi Code; the credentials live in `~/.kimi-code/credentials/` |
 | Plan usage: stale data | Token expired | Expiry is silent now — run any Claude Code session and the token refreshes itself |
 | Plan usage: `HTTP 429` | Endpoint rate limit | Passes on its own; you can raise `usage.pollSeconds` |
 | Cyrillic in `task` breaks | Old `emit-agent-event.py` | Hook scripts update automatically with `hooks.autoSetup = true`; otherwise reinstall via the command |
 | 🛑 doesn't block agents | The `PreToolUse` hook is not registered (old hook set) | **AI Office: Install Agent Hooks** — missing events get merged in |
+| Token counters stay at `—` | No transcripts under the workspace `cwd` yet | Send one prompt in the CLI; for Kimi the session dir appears under `~/.kimi-code/sessions/` |
+| The cost column is empty for some model | No published price for that model id | Known Claude and Kimi models are priced; anything else is left out rather than counted as zero |
+| Agents were stopped on their own | Auto-stop tripped at a plan limit | Expected at ≥95% of a window; click "Resume", or turn it off with `aiOffice.autoStop.enabled = false` |
 | Tools are blocked though you never enabled the stop | A stale stop flag remains | Click "Resume" on the dashboard, send a new prompt, or delete `~/.claude/office-stop.json` and `~/.kimi-code/office-stop.json` |
 
 ---

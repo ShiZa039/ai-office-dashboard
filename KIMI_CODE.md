@@ -16,6 +16,9 @@ Kimi-специфика проекта AI Office. Общие правила — 
   явного разрешения — глобальное правило.
 - Квоты подписки: `src/kimiUsage.ts` (OAuth, `api.kimi.com/coding/v1/usages`),
   протокол — `docs/USAGE-PROVIDERS.md` §2.
+- Счётчики токенов и стоимости: `src/tokenUsage.ts` читает `wire.jsonl`
+  (записи `usage.record`), цены и окна моделей — `src/pricing.ts`. Сплит по
+  субагентам берётся из `profile.bind`.
 
 ## Грабли
 

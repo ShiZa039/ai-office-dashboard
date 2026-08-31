@@ -43,6 +43,10 @@
 
 Реализовано в `src/kimiUsage.ts` (вариант A).
 
+> Транскрипты Kimi (формат `wire.jsonl`, маппинг `usage.record` на счётчики,
+> цены и окна моделей) разобраны отдельно — `docs/KIMI-USAGE.md`; здесь
+> только квоты подписки.
+
 - **A. Наш (CLI /usage):** `GET https://api.kimi.com/coding/v1/usages`,
   Bearer из `~/.kimi-code/credentials/*.json` (токены живут ~15 мин,
   рефрешит CLI). Ответ: `limits[]` — rate-окна (5-часовое =
@@ -77,8 +81,11 @@
 
 - **Дедуп токенов по `(message.id, requestId)`, last-wins** — Claude Code
   дублирует `message.usage` в JSONL транскриптах при стриминге/параллельных
-  тулколах; без дедупа суммы раздуты в разы (их issue #207). Актуально,
-  только если появится подсчёт токенов из транскриптов.
+  тулколах; без дедупа суммы раздуты в разы (их issue #207). **Перенесено**
+  в v0.17.0 (`src/tokenUsage.ts`): без дедупа числа удваивались, с ним
+  сходятся с `ccusage session --id` до токена. У Kimi дедуп не нужен —
+  в `usage.record` нет id сообщения, а `wire.jsonl` append-only, так что
+  роль дедупа играет байтовый офсет (`docs/KIMI-USAGE.md`).
 - **Фоновые пробы сами триггерят хуки** — их фоновый `claude /usage`
   порождал сессионные события; фильтруют по cwd пробы. У нас фонового
   опроса CLI нет; если появится — фильтровать так же
@@ -96,9 +103,15 @@
 | Что | Условие активации |
 |---|---|
 | Самостоятельный рефреш Claude-токена (`POST platform.claude.com/v1/oauth/token`, официальный client_id Claude Code `9d1c250a-e61b-44d9-88ed-5944d1962f5e`, scope `user:profile user:inference user:sessions:claude_code`, запись рефрешнутого токена обратно в credentials) | Пользователи массово видят протухшие квоты между сессиями CLI. Риск: пишем в чужие credentials |
-| Дедуп `(message.id, requestId)` + таблица цен моделей (USD/1M, prefix-matching, фолбэк на Sonnet-цену) | Появится фича подсчёта токенов/стоимости из транскриптов (альтернатива ccusage) |
 | Пробы других провайдеров (Codex: `~/.codex/auth.json` → `chatgpt.com/backend-api/wham/usage`; Gemini: `cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota`; Copilot: `api.github.com/copilot_internal/user` + PAT) | В расширении появилась поддержка сессий этого CLI (как было с Kimi). Непроверенный парсер без аккаунта — пассив |
 | Угадывание тира Kimi по размеру лимита | Вариант B эндпоинта станет основным |
+
+**Активировано:** дедуп `(message.id, requestId)` и таблица цен моделей —
+условие («появится подсчёт токенов/стоимости из транскриптов») выполнено
+в v0.17.0 / v0.18.0, реализация — `src/tokenUsage.ts` и `src/pricing.ts`.
+Фолбэка «неизвестная модель → цена Sonnet» мы сознательно не взяли:
+модель без известной цены исключается из сумм, а не оценивается наугад
+(`gotcha-placeholder-data`).
 
 ## OUT (не переносим)
 
