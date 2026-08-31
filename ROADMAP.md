@@ -1,6 +1,6 @@
 # Roadmap — AI Office
 
-История релизов и план развития. Текущая версия — `v0.20.1`.
+История релизов и план развития. Текущая версия — `v0.21.0`.
 
 > This file is maintained in Russian only (internal dev history). User-facing docs are bilingual: [README.md](README.md) / [README.ru.md](README.ru.md), [INSTALL.md](INSTALL.md) / [INSTALL.ru.md](INSTALL.ru.md).
 
@@ -446,6 +446,37 @@
 - Тег релиза теперь ставит `hooks/post-commit` при бампе `version` — см.
   «Цикл релиза»; заодно синхронизирован `package-lock.json`, застрявший на
   `0.17.1`
+
+### v0.21.0 — Kimi в счётчиках токенов и стоимости
+
+Kimi-паритет для панели расхода: до этого релиза Kimi-сессии не давали ни
+токенов, ни $-оценки. Исследование формата и цен выполнил **Kimi Code** по
+промптам №1/№2 из `docs/KIMI-TASK-PROMPT.md` (коммит `a4646b9`), результат —
+`docs/KIMI-USAGE.md`, где каждый факт подтверждён файлом на диске или URL.
+
+- `TokenScanner` принимает **список корней** вместо одного пути: к
+  `~/.claude/projects` добавился `~/.kimi-code/sessions` (или
+  `$KIMI_CODE_HOME/sessions`). Каждый файл помнит, из какого дерева он пришёл,
+  — от этого зависит и парсер, и то, как считается «папка проекта» для ретайра
+- Kimi-транскрипт — `<root>/wd_<slug>_<hash>/<session>/agents/<agent>/wire.jsonl`;
+  токены берутся из записей `usage.record` (`inputOther`/`output`/
+  `inputCacheRead`/`inputCacheCreation`). Хеш в имени workdir-каталога
+  невоспроизводим, поэтому slug — только предфильтр, а авторитетный `cwd`
+  читается из `state.json` сессии (оттуда берём **только** `cwd` и структуру
+  `agents`: `title`/`lastPrompt` — это текст промптов)
+- Дедуп у Kimi не нужен — в записях нет id сообщения, но файлы append-only,
+  так что байтовый офсет и есть дедуп
+- Сплит `byAgent`: имя каталога агента (`main` — основная цепочка, `agent-0`,
+  `agent-1`, …) уточняется до `profile.bind` — типа субагента — как только эта
+  строка попадётся в потоке
+- Цены (`pricing.ts`): `kimi-code/k3` — 3/15 $/MTok, `kimi-for-coding` —
+  0.95/4, `-highspeed` — 1.9/8. У Moonshot другая модель кэша: запись
+  биллится как обычный вход (премии нет, и в `usage` она всё равно 0), чтение
+  — по плоской ставке ($0.30 для k3). В `ModelPrice` появились необязательные
+  `cacheRead`/`cacheWrite`, перекрывающие ×1.25/×2/×0.1 Anthropic
+- Окно контекста фиксировано по алиасу модели: k3 → 1M, `k3-256k` и
+  coding-модели → 262K. Человеческие имена в тултипах — «Kimi K3»,
+  «Kimi K2.7 Code» и т.д.
 
 ---
 

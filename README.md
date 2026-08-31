@@ -4,7 +4,7 @@
 
 > A VSCode extension that visualizes Claude Code and Kimi Code CLI activity as an office floor map. Every subagent shows up as a figure in its own "room" (Backend, Frontend, QA, Security, DevOps, AI-lab, etc.), pulses while working, and gets a checkmark when done. On top: a main-model indicator, subscription usage limits, and an emergency stop button.
 
-**Current version:** `v0.20.1` · zero-config: dual CLI support (Claude Code + Kimi Code), automatic hook installation, agent auto-discovery, dynamic rooms, real Pro/Max plan limits, token & cost counters (per model and per subagent), auto-stop at plan limits, agent emergency stop, en/ru UI.
+**Current version:** `v0.21.0` · zero-config: dual CLI support (Claude Code + Kimi Code), automatic hook installation, agent auto-discovery, dynamic rooms, real Pro/Max plan limits, token & cost counters (per model and per subagent), auto-stop at plan limits, agent emergency stop, en/ru UI.
 
 ---
 
@@ -20,8 +20,8 @@ When you orchestrate several subagents in parallel, you lose track of who is doi
 - **A timeline** (Canvas) — who ran when, with a configurable window (5 min — 6 hours).
 - **An activity log** — the last 50 start/stop/waiting/stop-toggle events.
 - **Plan usage** — real subscription limits: the 5-hour session window and weekly limits, with percentages, reset times, a burn-pace indicator ("running hot / on pace / room to spare") with an even-pace tick on each bar, a forecast like "hits 100% in ~2h at the current pace", and quota degradation alerts. Same API as `/usage` in Claude Code; Kimi Code limits come from the Kimi Code API.
-- **Token counters** — incoming (prompt + cache write + cache read) and outgoing tokens for the current CLI session and for the project as a whole, read straight from the local transcripts (`~/.claude/projects/`) — no subprocess, no network. The project total spans every session ever recorded there and survives transcript pruning. Subagent transcripts (`…/<sessionId>/subagents/agent-*.jsonl`) are counted too. Hovering a counter breaks it down by kind (prompt / cache write / cache read), by model — Opus, Sonnet, the Haiku behind background tasks, or whatever else the CLI logged — and by subagent, so you can see which agent burned the budget (the per-agent section is hidden when only the main chain is in scope).
-- **API-equivalent cost ($)** — a third column next to the token counters prices the session and the project at public API list rates (cache writes ×1.25/×2 by TTL, cache reads ×0.1), with a per-model cost breakdown in the tooltip. Every tooltip line carries both tokens and dollars — `cache read (0.1×): 8,902,917 · ≈ $4.45` — which makes it obvious that cache is most of the volume and a small part of the bill. Below, a summary line compares the last 30 days against your subscription price — "30 days ≈ $142 at API prices · Max $100/mo — subscription saves ×1.4". The subscription price comes from `aiOffice.usage.subscriptionUsd`, or is guessed from your plan when unset. Models without a known price (e.g. Kimi) are excluded rather than counted as zero.
+- **Token counters** — incoming (prompt + cache write + cache read) and outgoing tokens for the current CLI session and for the project as a whole, read straight from the local transcripts of both CLIs (`~/.claude/projects/` and `~/.kimi-code/sessions/`) — no subprocess, no network. The project total spans every session ever recorded there and survives transcript pruning. Subagent transcripts are counted too — `…/<sessionId>/subagents/agent-*.jsonl` for Claude Code, `…/<sessionId>/agents/agent-*/wire.jsonl` for Kimi Code. Hovering a counter breaks it down by kind (prompt / cache write / cache read), by model — Opus, Sonnet, the Haiku behind background tasks, or whatever else the CLI logged — and by subagent, so you can see which agent burned the budget (the per-agent section is hidden when only the main chain is in scope).
+- **API-equivalent cost ($)** — a third column next to the token counters prices the session and the project at public API list rates (cache writes ×1.25/×2 by TTL, cache reads ×0.1), with a per-model cost breakdown in the tooltip. Every tooltip line carries both tokens and dollars — `cache read (0.1×): 8,902,917 · ≈ $4.45` — which makes it obvious that cache is most of the volume and a small part of the bill. Below, a summary line compares the last 30 days against your subscription price — "30 days ≈ $142 at API prices · Max $100/mo — subscription saves ×1.4". The subscription price comes from `aiOffice.usage.subscriptionUsd`, or is guessed from your plan when unset. Kimi models are priced too, at Moonshot list rates — their implicit cache bills writes as plain input and reads at a flat per-model rate, so the Anthropic ×1.25/×2/×0.1 multipliers do not apply to them. Models with no known price are excluded rather than counted as zero.
 - **Context gauge** — how full the current session's context window is: the prompt size of the latest request vs the model's window (200K, or 1M for `[1m]` models), with yellow/red thresholds at 70/90%. Subagent (sidechain) requests have their own context and don't move the gauge.
 - **Burn sparkline** — the session's token rate (tokens/min) over the last 30 minutes: outgoing as a green area, incoming (cache included) as a blue line.
 - **Per-window isolation** — each VSCode window only sees its own sessions (filtered by workspace `cwd`).
@@ -32,7 +32,7 @@ When you orchestrate several subagents in parallel, you lose track of who is doi
 1. Install the `.vsix`:
 
    ```
-   code --install-extension ai-office-dashboard-0.20.1.vsix --force
+   code --install-extension ai-office-dashboard-0.21.0.vsix --force
    ```
 
 2. Reload Window → a house icon appears in the Activity Bar.
@@ -127,7 +127,7 @@ For most projects the heuristics are enough — no configuration needed.
 - `AI Office: Clear Events` — reset the event cache
 - `AI Office: Open Settings` — VS Code Settings editor filtered to this extension (also the ⚙ button in the dashboard header)
 
-The bottom-right corner of the dashboard shows the installed version, a link to the repository, and the license — `v0.20.1 · GitHub · MIT`; the link is derived from `package.json`, not hardcoded in the markup.
+The bottom-right corner of the dashboard shows the installed version, a link to the repository, and the license — `v0.21.0 · GitHub · MIT`; the link is derived from `package.json`, not hardcoded in the markup.
 
 ## Development
 
@@ -154,7 +154,7 @@ Release history and plans — [ROADMAP.md](ROADMAP.md) (in Russian).
 - `SubagentStart` does not pass `description`/`prompt` ([anthropics/claude-code#19170](https://github.com/anthropics/claude-code/issues/19170)) — the `task` field is filled from `last_assistant_message` on `agent_stop`.
 - The subscription limits endpoint is undocumented (the same one `/usage` in Claude Code uses) — the format may change; the parser is resilient to missing fields.
 - The emergency stop does not interrupt a tool call that is already running — only subsequent calls are blocked.
-- Kimi Code does not fire hooks in non-interactive mode (`kimi --print` / `kimi -p`) — neither dashboard events nor the emergency stop apply to such runs (verified on kimi 1.30.0).
+- Kimi Code does not fire hooks in non-interactive mode (`kimi --print` / `kimi -p`) — neither dashboard events nor the emergency stop apply to such runs (verified on kimi 1.30.0). Their token and cost figures do show up, though — those are read from the transcripts.
 - The Plan usage limits panel works for both CLIs (Claude Code and Kimi Code); the ccusage $-bars are Claude Code only.
 - Sound effects are not planned.
 
