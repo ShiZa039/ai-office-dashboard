@@ -143,12 +143,12 @@ var MESSAGES = {
     labelWeeklyOpus: "Weekly Opus ($)",
     tl5: "5 min", tl15: "15 min", tl30: "30 min", tl1h: "1 hour", tl6h: "6 hours",
     stopActive: "Emergency stop is active",
-    stopHint: "All agent tool calls are blocked. Press Resume or just send the agent a new prompt.",
+    stopHint: "Claude Code and Kimi Code tool calls are blocked. Press Resume or send a new prompt.",
     stopResume: "Resume",
     stopBtnLabel: "Emergency stop",
-    stopBtnHint: "Block all agent tool calls immediately",
-    stopBtnTitle: "Emergency stop — block all agent tool calls now. Sessions and context survive; resume with the button or a new prompt.",
-    logStopOn: "EMERGENCY STOP — agents blocked",
+    stopBtnHint: "Block Claude Code and Kimi Code tool calls immediately",
+    stopBtnTitle: "Emergency stop blocks Claude Code and Kimi Code tool calls. Resume with the button or a new prompt.",
+    logStopOn: "EMERGENCY STOP — Claude Code and Kimi Code blocked",
     logStopOff: "emergency stop released",
     drawerClose: "Close",
     drawerCloseTitle: "Close the panel (Esc)",
@@ -235,12 +235,12 @@ var MESSAGES = {
     labelWeeklyOpus: "Opus за неделю ($)",
     tl5: "5 мин", tl15: "15 мин", tl30: "30 мин", tl1h: "1 час", tl6h: "6 часов",
     stopActive: "Экстренная остановка активна",
-    stopHint: "Все вызовы инструментов агентов блокируются. Нажмите «Продолжить» или просто отправьте агенту новый промпт.",
+    stopHint: "Вызовы инструментов Claude Code и Kimi Code блокируются. Нажмите «Продолжить» или отправьте новый промпт.",
     stopResume: "Продолжить",
     stopBtnLabel: "Экстренная остановка",
-    stopBtnHint: "Мгновенно заблокировать все действия агентов",
-    stopBtnTitle: "Экстренная остановка — немедленно заблокировать все вызовы инструментов. Сессии и контекст сохраняются; возобновление кнопкой или новым промптом.",
-    logStopOn: "ЭКСТРЕННАЯ ОСТАНОВКА — агенты заблокированы",
+    stopBtnHint: "Мгновенно заблокировать вызовы инструментов Claude Code и Kimi Code",
+    stopBtnTitle: "Экстренная остановка блокирует вызовы инструментов Claude Code и Kimi Code. Возобновите работу кнопкой или новым промптом.",
+    logStopOn: "ЭКСТРЕННАЯ ОСТАНОВКА — Claude Code и Kimi Code заблокированы",
     logStopOff: "экстренная остановка снята",
     drawerClose: "Закрыть",
     drawerCloseTitle: "Закрыть панель (Esc)",
@@ -387,6 +387,8 @@ function setText(id, val) {
  */
 function formatModelName(id) {
   if (!id) return "";
+  var gpt = String(id).match(/^gpt-(\d+(?:\.\d+)?)(?:-([a-z]+))?(?:-\d{4}-\d{2}-\d{2})?$/i);
+  if (gpt) return "GPT-" + gpt[1] + (gpt[2] ? " " + gpt[2].charAt(0).toUpperCase() + gpt[2].slice(1) : "");
   var parts = String(id).replace(/^.*?claude-/, "").split("-");
   var nums = [], words = [];
   for (var i = 0; i < parts.length; i++) {
@@ -497,7 +499,7 @@ function render() {
     // Compact mode: idle agents collapse into a per-room "+N" chip so a big
     // roster doesn't blow up the dashboard height.
     if (hideIdle && agent.state === "idle") {
-      (idleByRoom[agent.room] = idleByRoom[agent.room] || []).push(name);
+      (idleByRoom[agent.room] = idleByRoom[agent.room] || []).push(agent.name || name);
       continue;
     }
 
@@ -519,12 +521,12 @@ function render() {
     // and that comes from our own trusted local registry.
     var icon = document.createElement("span");
     icon.className = "agent-icon";
-    icon.innerHTML = getAgentIcon(name, agent.room);
+    icon.innerHTML = getAgentIcon(agent.name || name, agent.room);
     el.appendChild(icon);
 
     var nameEl = document.createElement("span");
     nameEl.className = "agent-name";
-    nameEl.textContent = shortName(name);
+    nameEl.textContent = shortName(agent.name || name);
     el.appendChild(nameEl);
 
     if (instances) {
@@ -540,7 +542,7 @@ function render() {
     tooltip.className = "agent-tooltip";
     var tipName = document.createElement("div");
     tipName.className = "tooltip-name";
-    tipName.textContent = name + (instances ? " ×" + instances : "");
+    tipName.textContent = (agent.name || name) + (instances ? " ×" + instances : "");
     tooltip.appendChild(tipName);
     if (agent.task) {
       var tipTask = document.createElement("div");
@@ -733,7 +735,7 @@ function drawSpan(ctx, W, H, startTime, now, spanStart, spanEnd, room, active) {
   ctx.globalAlpha = 1;
 }
 
-function addLogEntry(agent, event, task, room) {
+function addLogEntry(agent, event, task, room, displayName) {
   var log = document.getElementById("event-log");
   if (!log) return;
   eventCount++;
@@ -745,7 +747,8 @@ function addLogEntry(agent, event, task, room) {
   var isMain = agent === MAIN_AGENT;
   var cls = isStart ? "start" : isError ? "error" : "stop";
   var arrow = isStart ? "▶" : isError ? "✖" : "✔";
-  var label = task && task !== "ERROR" ? shortName(agent) + ": " + task : shortName(agent);
+  var label = shortName(displayName || agent);
+  if (task && task !== "ERROR") label += ": " + task;
   var time = formatTime(Date.now());
 
   // Main-model turns still land on the timeline, but "completed" counts agents only.
@@ -884,7 +887,7 @@ function renderAgentDrawer() {
   titleBox.className = "drawer-title";
   var nameEl = document.createElement("div");
   nameEl.className = "drawer-name";
-  nameEl.textContent = drawerAgent;
+  nameEl.textContent = (detail && detail.name) || (currentAgents[drawerAgent] || {}).name || drawerAgent;
   var subEl = document.createElement("div");
   subEl.className = "drawer-sub";
   subEl.textContent = roomLabel(room) + " · " + drawerStateLabel(state) +
@@ -992,11 +995,11 @@ window.addEventListener("message", function(evt) { // noqa: secret
       var prev = currentAgents[name];
       agentRoomCache[name] = agent.room;
       if (!prev && agent.state === "working") {
-        addLogEntry(name, "agent_start", agent.task, agent.room);
+        addLogEntry(name, "agent_start", agent.task, agent.room, agent.name);
       } else if (prev && prev.state !== agent.state) {
-        if (agent.state === "working") addLogEntry(name, "agent_start", agent.task, agent.room);
-        else if (agent.state === "done") addLogEntry(name, "agent_stop", agent.task, agent.room);
-        else if (agent.state === "error") addLogEntry(name, "agent_stop", "ERROR", agent.room);
+        if (agent.state === "working") addLogEntry(name, "agent_start", agent.task, agent.room, agent.name);
+        else if (agent.state === "done") addLogEntry(name, "agent_stop", agent.task, agent.room, agent.name);
+        else if (agent.state === "error") addLogEntry(name, "agent_stop", "ERROR", agent.room, agent.name);
       }
     }
     currentAgents = msg.agents;
@@ -1020,7 +1023,7 @@ window.addEventListener("message", function(evt) { // noqa: secret
     if (wasStopped !== stopActive) addStopLogEntry(stopActive);
     renderStop();
   } else if (msg.type === "agent_detail") {
-    if (drawerAgent && msg.detail && msg.detail.name === drawerAgent) {
+    if (drawerAgent && msg.detail && (msg.detail.id || msg.detail.name) === drawerAgent) {
       drawerDetail = msg.detail;
       renderAgentDrawer();
     }
@@ -1288,7 +1291,7 @@ function groupDigits(n) {
  * traffic: the plain input number alone is a few thousand against millions of
  * cache reads, which reads as a bug rather than as a cheap prompt.
  */
-function fillTokenCells(inId, outId, totals, scopeTitle, byModel, byAgent, costParts) {
+function fillTokenCells(inId, outId, totals, scopeTitle, byModel, byAgent, costParts, labels) {
   var inEl = document.getElementById(inId);
   var outEl = document.getElementById(outId);
   if (!inEl || !outEl) return;
@@ -1316,9 +1319,9 @@ function fillTokenCells(inId, outId, totals, scopeTitle, byModel, byAgent, costP
     scopeTitle + "\n" + tr("tokensIn") + ": " + amount(incoming, incomingCost) +
     "\n  " + tr("tokensPromptFull") + ": " +
       amount(totals.input, parts ? parts.input : null) +
-    "\n  " + tr("tokensCacheWrite") + ": " +
+    "\n  " + ((labels && labels.cacheWrite) || tr("tokensCacheWrite")) + ": " +
       amount(totals.cacheCreate, parts ? parts.cacheWrite : null) +
-    "\n  " + tr("tokensCacheRead") + ": " +
+    "\n  " + ((labels && labels.cacheRead) || tr("tokensCacheRead")) + ": " +
       amount(totals.cacheRead, parts ? parts.cacheRead : null) +
     modelBreakdown(byModel, incomingOf) +
     agentBreakdown(byAgent, incomingOf);
@@ -1398,25 +1401,32 @@ function agentBreakdown(byAgent, metric) {
 }
 
 /** "≈ $4.20" cell with a per-model cost breakdown in the tooltip. */
-function fillCostCell(id, cost, scopeTitle, byModel) {
+function fillCostCell(id, cost, scopeTitle, byModel, labels, byAgent) {
   var el = document.getElementById(id);
   if (!el) return;
+  var note = (labels && labels.costNote) || tr("tokensCostApprox");
+  var format = labels ? formatUsdPrecise : formatUsd;
   if (cost == null) {
     el.textContent = "—";
-    el.title = scopeTitle + "\n" + tr("tokensCostApprox");
+    el.title = scopeTitle + "\n" + note;
     return;
   }
-  el.textContent = "≈ " + formatUsd(cost);
-  var title = scopeTitle + "\n" + tr("tokensCostApprox");
+  el.textContent = "≈ " + format(cost);
+  var title = scopeTitle + "\n" + note;
   if (byModel && byModel.length) {
     var rows = byModel
       .filter(function (s) { return s.costUsd != null && s.costUsd > 0; })
       .sort(function (a, b) { return b.costUsd - a.costUsd; });
     if (rows.length) {
       title += "\n" + tr("tokensCostByModel") + ":" + rows.map(function (r) {
-        return "\n  " + (r.model || tr("tokensModelUnknown")) + ": " + formatUsd(r.costUsd);
+        return "\n  " + (r.model || tr("tokensModelUnknown")) + ": " + format(r.costUsd);
       }).join("");
     }
+  }
+  if (byAgent && byAgent.some(function (row) { return row.agent; })) {
+    title += "\n" + tr("tokensByAgent") + ":" + byAgent.map(function (row) {
+      return "\n  " + (row.agent || tr("tokensAgentMain")) + ": " + (row.costUsd == null ? "—" : format(row.costUsd));
+    }).join("");
   }
   el.title = title;
 }
@@ -1576,37 +1586,45 @@ function renderTokenSpark() {
   }
 }
 
-function renderTokens(tokens) {
-  var section = document.getElementById("usage-tokens");
+function renderTokens(tokens, codex) {
+  var section = document.getElementById(codex ? "usage-codex-tokens" : "usage-tokens");
   if (!(section instanceof HTMLElement)) return;
   if (!tokens || !tokens.total) {
     section.hidden = true;
     return;
   }
   section.hidden = false;
+  var prefix = codex ? "tok-codex-" : "tok-";
+  var labels = codex ? section.dataset : null;
+  var projectTitle = (labels && labels.projectTitle) || tr("tokensTotalTitle");
   fillTokenCells(
-    "tok-session-in", "tok-session-out",
+    prefix + "session-in", prefix + "session-out",
     tokens.session ? tokens.session.totals : null,
     tr("tokensSessionTitle"),
     tokens.session ? tokens.session.byModel : null,
     tokens.session ? tokens.session.byAgent : null,
     tokens.session ? tokens.session.costParts : null,
+    labels,
   );
   fillTokenCells(
-    "tok-total-in", "tok-total-out",
+    prefix + "total-in", prefix + "total-out",
     tokens.total,
-    tr("tokensTotalTitle"),
+    projectTitle,
     tokens.byModel,
     tokens.byAgent,
     tokens.totalCostParts,
+    labels,
   );
   fillCostCell(
-    "tok-session-cost",
+    prefix + "session-cost",
     tokens.session ? tokens.session.costUsd : null,
     tr("tokensSessionTitle"),
     tokens.session ? tokens.session.byModel : null,
+    labels, codex && tokens.session ? tokens.session.byAgent : null,
   );
-  fillCostCell("tok-total-cost", tokens.totalCostUsd, tr("tokensTotalTitle"), tokens.byModel);
+  fillCostCell(prefix + "total-cost", tokens.totalCostUsd, projectTitle, tokens.byModel,
+    labels, codex ? tokens.byAgent : null);
+  if (codex) return;
   renderTokenContext(tokens.session ? tokens.session.context : null);
   recordSparkSample(tokens.session, tokens.fetchedAt);
   renderTokenSpark();
@@ -1615,9 +1633,12 @@ function renderTokens(tokens) {
 
 function renderUsage() {
   if (!lastUsage) return;
-  var subs = lastUsage.subscription || {};
-  var cost = lastUsage.cost;
+  var active = lastUsage.quotaProvider;
+  var snapshots = lastUsage.subscription || {};
+  var subs = active ? { [active]: snapshots[active] } : {};
+  var cost = active === "claude" ? lastUsage.cost : null;
   renderTokens(lastUsage.tokens);
+  renderTokens(lastUsage.codexTokens, true);
 
   var costSection = document.getElementById("usage-cost");
   var upd = document.getElementById("usage-updated");
@@ -1625,6 +1646,10 @@ function renderUsage() {
   var fetched = renderSubSection("usage-subscription", subs.claude, "Claude Code");
   var kimiFetched = renderSubSection("usage-kimi", subs.kimi, "Kimi Code");
   if (kimiFetched && (!fetched || kimiFetched > fetched)) fetched = kimiFetched;
+  var codexCaption = subs.codex
+    ? "Codex · " + tr("updatedAt", { t: new Date(subs.codex.fetchedAt).toLocaleString(TIME_LOCALE) })
+    : "Codex";
+  var codexFetched = renderSubSection("usage-codex", subs.codex, codexCaption);
   renderForecast(subs);
 
   if (cost) {
@@ -1647,14 +1672,22 @@ function renderUsage() {
   // so it also feeds the "updated" stamp instead of leaving it on "loading…".
   var stamp = fetched || (cost && cost.fetchedAt) ||
     (lastUsage.tokens && lastUsage.tokens.fetchedAt);
-  if (upd && stamp) upd.textContent = tr("updatedAt", { t: formatTime(stamp) });
+  var codexStamp = codexFetched || (lastUsage.codexTokens && lastUsage.codexTokens.fetchedAt);
+  if (upd && (stamp || codexStamp)) {
+    upd.textContent = tr("updatedAt", { t: formatTime(stamp || codexStamp) });
+    upd.dataset.codexStamp = stamp ? "false" : "true";
+  } else if (upd && upd.dataset.codexStamp === "true") {
+    upd.textContent = tr("labelLoading");
+    delete upd.dataset.codexStamp;
+  }
 }
 
 function renderUsageError(source, message) {
-  // Don't let one provider's hiccup wipe live data from the others.
+  var active = lastUsage && lastUsage.quotaProvider;
+  if (active !== (source === "cost" ? "claude" : source)) return;
   var subs = (lastUsage && lastUsage.subscription) || {};
   if (source === "cost") {
-    if (subs.claude || subs.kimi || (lastUsage && lastUsage.cost)) return;
+    if (subs.claude || (lastUsage && lastUsage.cost)) return;
   } else if (subs[source]) return;
   var upd = document.getElementById("usage-updated");
   if (upd) upd.textContent = tr("usageError", { m: message });

@@ -64,6 +64,8 @@ export interface AgentRun {
 
 /** Drill-down payload for one agent: current state + paired run history. */
 export interface AgentDetail {
+  /** Stable dashboard key when the display name is shared by multiple agents. */
+  id?: string;
   name: string;
   state: AgentState | null;
   runs: AgentRun[];

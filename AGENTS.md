@@ -2,7 +2,7 @@
 
 ## Направление проекта
 
-- Плагин развивается как мультимодельный: поддержка не только Claude Code, но и Kimi Code (и далее других агентов).
+- Плагин развивается как мультимодельный: Claude Code, Kimi Code, локальный OpenAI Codex и другие агенты в дальнейшем.
 
 ## Ветки
 
@@ -21,6 +21,7 @@
 - `src/extension.ts` — точка входа, команды, вебвью-провайдер.
 - `src/hookConfig.ts` / `src/hookConfigKimi.ts` — чистая логика регистрации хуков (без `vscode`); клей с ФС/UI — `src/hookInstaller.ts`.
 - `src/subscriptionUsage.ts` / `src/kimiUsage.ts` — OAuth-пробы квот планов (Claude/Kimi), 429-backoff; `src/usagePace.ts` — pace-модель (burn rate vs окно). Протоколы и боевой опыт: `docs/USAGE-PROVIDERS.md`.
+- `src/codexActivity.ts` — чтение локальных журналов Codex CLI и VS Code для карты агентов и снимков лимитов. `src/codexUsage.ts` / `src/codexPricing.ts` — токены и API-оценка по моделям и субагентам.
 - `src/tokenUsage.ts` — счётчики токенов из транскриптов обоих CLI (`~/.claude/projects`, `~/.kimi-code/sessions`), сплиты по моделям и субагентам, контекст сессии. Формат Kimi-транскриптов: `docs/KIMI-USAGE.md`.
 - `src/pricing.ts` — цены моделей и разбивка стоимости; `src/modelSelection.ts` — выбор модели пользователем (единственный источник маркера 1M-контекста, транскрипт его не несёт).
 - `src/stopFlag.ts` — формат и мерж флагов `office-stop.json` (расширенческая сторона); `src/autoStop.ts` — разовый предохранитель по лимитам плана.

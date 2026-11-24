@@ -130,7 +130,10 @@ export function emptyCostParts(): CostParts {
  */
 export function costPartsUsd(raw: string, t: TokenTotals): CostParts | null {
   const price = priceForModel(raw);
-  if (!price) return null;
+  return price ? costPartsAtPrice(price, t) : null;
+}
+
+export function costPartsAtPrice(price: ModelPrice, t: TokenTotals): CostParts {
   const cache1h = Math.min(t.cacheCreate1h ?? 0, t.cacheCreate);
   const cache5m = t.cacheCreate - cache1h;
   const input = (t.input * price.input) / 1e6;

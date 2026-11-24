@@ -57,7 +57,7 @@ const otherDir = path.join(root, projectDirSlug(otherCwd));
 fs.mkdirSync(projectDir, { recursive: true });
 fs.mkdirSync(otherDir, { recursive: true });
 
-let clock = Date.parse('2026-08-08T10:00:00.000Z');
+let clock = Date.now() - 24 * 60 * 60_000;
 
 interface EntryOpts {
   session: string;

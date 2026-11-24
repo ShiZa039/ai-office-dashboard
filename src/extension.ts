@@ -18,9 +18,11 @@ import { PersistedTokenState, TokenScanner } from './tokenUsage';
 import { readModelSelection } from './modelSelection';
 import { footerMetaHtml } from './repoLink';
 import { kimiUsageProvider } from './kimiUsage';
+import { CodexActivity } from './codexActivity';
+import { currentMainSession } from './quotaProvider';
 import { discoverProjectAgents } from './agentRoster';
 import { ensureHooksOnActivation, installHooks } from './hookInstaller';
-import { MAIN_AGENT_NAME, getRoomForAgent } from './types';
+import { AgentDetail, MAIN_AGENT_NAME, getRoomForAgent } from './types';
 import { buildAgentRuns } from './agentDetail';
 import { isRussianUi } from './locale';
 import {
@@ -119,7 +121,8 @@ const log = vscode.window.createOutputChannel('AI Office');
 
 export function activate(context: vscode.ExtensionContext) {
   store = new AgentStateStore();
-  store.setRoomResolver(buildRoomResolver());
+  let codexRoomFor = buildRoomResolver();
+  store.setRoomResolver(codexRoomFor);
   store.setCwdFilter(currentCwdFilter());
   const filterDesc = currentCwdFilter();
   log.appendLine(
@@ -130,6 +133,8 @@ export function activate(context: vscode.ExtensionContext) {
     String(context.extension.packageJSON.version ?? ''),
     footerMetaHtml(context.extension.packageJSON),
   );
+  const codexActivity = new CodexActivity();
+  let codexAgents = new Map<string, AgentDetail>();
 
   const configPath = vscode.workspace
     .getConfiguration('aiOffice')
@@ -216,7 +221,7 @@ export function activate(context: vscode.ExtensionContext) {
   };
 
   // Latest quota snapshots per provider (filled by handleQuotaUpdate).
-  const lastQuotas: Partial<Record<'claude' | 'kimi', SubscriptionSnapshot>> = {};
+  const lastQuotas: Partial<Record<NonNullable<SubscriptionSnapshot['provider']>, SubscriptionSnapshot>> = {};
 
   /** One compact status-bar/tooltip token per limit: "5h 12%" / "7d 34%". */
   const compactQuota = (l: UsageLimitEntry): string => {
@@ -226,13 +231,14 @@ export function activate(context: vscode.ExtensionContext) {
   };
 
   const quotaTooltipLines = (): string | null => {
-    const lines: string[] = [];
-    for (const [id, snap] of Object.entries(lastQuotas)) {
-      if (!snap?.limits?.length) continue;
-      const parts = snap.limits.slice(0, 3).map(compactQuota);
-      lines.push(`${id === 'claude' ? 'Claude' : 'Kimi'}: ${parts.join(' · ')}`);
-    }
-    return lines.length > 0 ? lines.join('\n') : null;
+    const id = provider.getDisplayedQuotaProvider();
+    const snap = id ? lastQuotas[id] : null;
+    if (!snap?.limits.length) return null;
+    const parts = snap.limits.slice(0, 3).map((limit) =>
+      id === 'codex' ? `${limit.label} ${limit.utilization.toFixed(0)}%` : compactQuota(limit),
+    );
+    const name = id === 'claude' ? 'Claude' : id === 'kimi' ? 'Kimi' : 'Codex';
+    return `${name}: ${parts.join(' · ')}`;
   };
 
   const updateStatusBar = () => {
@@ -240,7 +246,7 @@ export function activate(context: vscode.ExtensionContext) {
       statusBarItem.hide();
       return;
     }
-    const snapshot = store.getSnapshot();
+    const snapshot = dashboardAgents();
     const waiting = store.getWaiting();
     let working = 0;
     let errors = 0;
@@ -263,8 +269,8 @@ export function activate(context: vscode.ExtensionContext) {
       statusBarItem.text = '🛑 Agents';
       statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
       statusBarItem.tooltip = ru
-        ? 'AI Office: экстренная остановка — все вызовы инструментов блокируются'
-        : 'AI Office: emergency stop — all tool calls are blocked';
+        ? 'AI Office: экстренная остановка блокирует инструменты Claude Code и Kimi Code'
+        : 'AI Office: emergency stop blocks Claude Code and Kimi Code tools';
       statusBarItem.show();
       return;
     }
@@ -296,6 +302,9 @@ export function activate(context: vscode.ExtensionContext) {
       statusBarItem.tooltip = ru
         ? `AI Office: агентов: ${total}, все без задач`
         : `AI Office: ${total} agents, all idle`;
+    } else if (provider.getDisplayedQuotaProvider() === 'codex' && lastQuotas.codex?.limits.length) {
+      statusBarItem.text = '$(graph) Codex';
+      statusBarItem.tooltip = 'AI Office';
     } else {
       statusBarItem.hide();
       return;
@@ -305,9 +314,19 @@ export function activate(context: vscode.ExtensionContext) {
     statusBarItem.show();
   };
 
+  const dashboardAgents = () => {
+    const agents = store?.getSnapshot() ?? {};
+    for (const [id, detail] of codexAgents) {
+      if (detail.state) agents[id] = detail.state;
+    }
+    return agents;
+  };
+
   const broadcastState = () => {
     if (!store) return;
-    provider.updateAgents(store.getSnapshot(), store.getModel(), store.getWaiting());
+    const focus = currentMainSession(store.quotaActivity.current(), codexActivity.latestMainSession(currentCwdFilter()));
+    provider.updateQuotaFocus(focus?.provider);
+    provider.updateAgents(dashboardAgents(), focus ? focus.model : store.getModel(), store.getWaiting());
     updateStatusBar();
     pushAgentDetail();
   };
@@ -317,6 +336,11 @@ export function activate(context: vscode.ExtensionContext) {
   let detailAgent: string | null = null;
   const pushAgentDetail = () => {
     if (!store || !detailAgent) return;
+    const codexDetail = codexAgents.get(detailAgent);
+    if (codexDetail) {
+      provider.sendAgentDetail(codexDetail);
+      return;
+    }
     const snapshot = store.getSnapshot();
     provider.sendAgentDetail({
       name: detailAgent,
@@ -404,6 +428,8 @@ export function activate(context: vscode.ExtensionContext) {
   const clearCmd = vscode.commands.registerCommand('aiOffice.clearEvents', () => {
     if (!store) return;
     store.clear();
+    codexActivity.clearActivity();
+    codexAgents.clear();
     try {
       fs.writeFileSync(eventsFile, '');
     } catch {
@@ -669,6 +695,64 @@ export function activate(context: vscode.ExtensionContext) {
   const usageEnabled = () =>
     vscode.workspace.getConfiguration('aiOffice').get<boolean>('usage.enabled', true);
 
+  let codexStateKey = '';
+  const refreshCodexAgents = () => {
+    const folders = currentCwdFilter();
+    const next = codexActivity.agents(folders, codexRoomFor);
+    const input = JSON.stringify([[...next], codexActivity.latestMainSession(folders)]);
+    codexAgents = next;
+    if (input !== codexStateKey) {
+      codexStateKey = input;
+      broadcastState();
+    }
+  };
+
+  let codexQuotaKey = '';
+  const refreshCodexQuota = () => {
+    const quota = usageEnabled() ? codexActivity.quota() : null;
+    const key = quota ? JSON.stringify(quota) : '';
+    if (key === codexQuotaKey) return;
+    codexQuotaKey = key;
+    if (quota) {
+      lastQuotas.codex = quota;
+      provider.updateSubscription(quota);
+    } else {
+      delete lastQuotas.codex;
+      provider.clearCodexSubscription();
+    }
+    updateStatusBar();
+  };
+
+  const codexTokensEnabled = () => usageEnabled() && tokensEnabled();
+  let codexTokensKey = '';
+  const refreshCodexTokens = () => {
+    const snapshot = codexTokensEnabled() ? codexActivity.tokens(currentCwdFilter()) : null;
+    const key = snapshot ? JSON.stringify(snapshot) : '';
+    if (key === codexTokensKey) return;
+    codexTokensKey = key;
+    provider.updateCodexTokens(snapshot);
+  };
+
+  let codexDisposed = false;
+  let codexPolling = false;
+  const pollCodex = async () => {
+    if (codexPolling) return;
+    codexPolling = true;
+    try {
+      await codexActivity.poll(Date.now(), codexTokensEnabled());
+      if (codexDisposed) return;
+      refreshCodexAgents();
+      refreshCodexQuota();
+      refreshCodexTokens();
+    } catch (err) {
+      log.appendLine(`AI Office: Codex scan failed: ${String(err)}`);
+    } finally {
+      codexPolling = false;
+    }
+  };
+  const codexTimer = setInterval(() => void pollCodex(), 5_000);
+  void pollCodex();
+
   if (usageEnabled()) {
     startSubscriptionWatcher();
     if (costSource() === 'ccusage') startCostWatcher();
@@ -677,16 +761,20 @@ export function activate(context: vscode.ExtensionContext) {
 
   const cfgChange = vscode.workspace.onDidChangeConfiguration((e) => {
     if (e.affectsConfiguration('aiOffice.agentRooms') && store) {
-      store.setRoomResolver(buildRoomResolver());
+      codexRoomFor = buildRoomResolver();
+      store.setRoomResolver(codexRoomFor);
+      refreshCodexAgents();
     }
     if (e.affectsConfiguration('aiOffice.scope') && store) {
       store.setCwdFilter(currentCwdFilter());
       store.clear();
       seedRoster(store);
+      refreshCodexAgents();
       broadcastState();
       refreshStopState();
       // Token totals are scoped the same way — rescan under the new filter.
       if (usageEnabled() && tokensEnabled()) startTokenWatcher();
+      refreshCodexTokens();
     }
     if (e.affectsConfiguration('aiOffice.roster') && store) {
       store.clear();
@@ -707,6 +795,8 @@ export function activate(context: vscode.ExtensionContext) {
       );
     }
     if (!e.affectsConfiguration('aiOffice.usage')) return;
+    refreshCodexQuota();
+    refreshCodexTokens();
 
     // Restart usage watchers with fresh config.
     subscriptionWatcher?.stop();
@@ -729,10 +819,13 @@ export function activate(context: vscode.ExtensionContext) {
 
   const foldersChange = vscode.workspace.onDidChangeWorkspaceFolders(() => {
     if (!store) return;
-    store.setRoomResolver(buildRoomResolver());
+    codexRoomFor = buildRoomResolver();
+    store.setRoomResolver(codexRoomFor);
     store.setCwdFilter(currentCwdFilter());
     store.clear();
     seedRoster(store);
+    refreshCodexAgents();
+    refreshCodexTokens();
     broadcastState();
     refreshStopState();
     if (usageEnabled() && tokensEnabled()) startTokenWatcher();
@@ -742,6 +835,7 @@ export function activate(context: vscode.ExtensionContext) {
     viewRegistration, showCmd, openInEditorCmd, emergencyStopCmd, installHooksCmd, clearCmd,
     openSettingsCmd,
     cfgChange, foldersChange, statusBarItem,
+    { dispose: () => { codexDisposed = true; clearInterval(codexTimer); } },
   );
 }
 

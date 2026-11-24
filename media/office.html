@@ -97,6 +97,7 @@
       <!-- Limit bars (with provider captions) are built dynamically from the API responses. -->
       <div class="usage-group" id="usage-subscription" hidden></div>
       <div class="usage-group" id="usage-kimi" hidden></div>
+      <div class="usage-group" id="usage-codex" hidden></div>
       <!-- Token counters: current session and everything this project ever spent. -->
       <div class="usage-group usage-tokens" id="usage-tokens" hidden>
         <div class="usage-group-caption" data-i18n="labelTokens">Tokens</div>
@@ -122,6 +123,23 @@
         <canvas id="token-spark" class="token-spark" hidden></canvas>
         <!-- API-equivalent cost of the last 30 days vs the subscription price. -->
         <div class="token-subline" id="token-subline" hidden></div>
+      </div>
+      <div class="usage-group usage-tokens" id="usage-codex-tokens" hidden
+           data-cost-note="{{codexCostNote}}" data-cache-write="{{codexCacheWrite}}"
+           data-cache-read="{{codexCacheRead}}" data-project-title="{{codexProjectTitle}}">
+        <div class="usage-group-caption">Codex · <span data-i18n="labelTokens">Tokens</span></div>
+        <div class="token-row">
+          <span class="token-scope" data-i18n="tokensSession">session</span>
+          <span class="token-val token-val--in" id="tok-codex-session-in">&mdash;</span>
+          <span class="token-val token-val--out" id="tok-codex-session-out">&mdash;</span>
+          <span class="token-val token-val--cost" id="tok-codex-session-cost">&mdash;</span>
+        </div>
+        <div class="token-row">
+          <span class="token-scope" data-i18n="tokensTotal">total</span>
+          <span class="token-val token-val--in" id="tok-codex-total-in">&mdash;</span>
+          <span class="token-val token-val--out" id="tok-codex-total-out">&mdash;</span>
+          <span class="token-val token-val--cost" id="tok-codex-total-cost">&mdash;</span>
+        </div>
       </div>
       <div class="usage-forecast" id="usage-forecast" hidden></div>
       <div class="usage-group" id="usage-cost" hidden>

@@ -5,6 +5,7 @@ import {
   SessionWaiting,
   getRoomForAgent,
 } from './types';
+import { HookQuotaActivity } from './quotaProvider';
 
 type RoomResolver = (agentName: string) => string;
 
@@ -28,6 +29,7 @@ function normalizeCwd(p: string | undefined | null): string {
 }
 
 export class AgentStateStore {
+  readonly quotaActivity = new HookQuotaActivity();
   private agents: Map<string, AgentState> = new Map();
   private doneTimers: Map<string, NodeJS.Timeout> = new Map();
   private recentEvents: AgentEvent[] = [];
@@ -107,6 +109,7 @@ export class AgentStateStore {
   processEvent(event: AgentEvent): void {
     // cwd-scoped store drops events from other windows/projects entirely.
     if (!this.matchesCwd(event.cwd)) return;
+    this.quotaActivity.observe(event);
 
     // Any event may carry the session model (session_start directly, others
     // via the transcript) — remember the newest one seen.
@@ -282,6 +285,7 @@ export class AgentStateStore {
   }
 
   clear(): void {
+    this.quotaActivity.clear();
     for (const timer of this.doneTimers.values()) {
       clearTimeout(timer);
     }

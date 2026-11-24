@@ -3,6 +3,10 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { AgentDetail, AgentState, SessionWaiting } from '../types';
 import { uiLocale } from '../locale';
+import type { SubscriptionSnapshot } from '../subscriptionUsage';
+import type { CodexTokenSnapshot } from '../codexUsage';
+import { visibleQuotaProvider } from '../quotaProvider';
+import type { QuotaProvider } from '../quotaProvider';
 
 interface WebviewSlot {
   webview: vscode.Webview;
@@ -20,9 +24,13 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
   private lastModel: string | null = null;
   private lastWaiting: SessionWaiting | null = null;
   private lastStop: { active: boolean; since: string | null } = { active: false, since: null };
-  private lastSubscription: { claude: unknown; kimi: unknown } = { claude: null, kimi: null };
+  private lastSubscription: Record<NonNullable<SubscriptionSnapshot['provider']>, SubscriptionSnapshot | null> = {
+    claude: null, kimi: null, codex: null,
+  };
   private lastCost: unknown = null;
   private lastTokens: unknown = null;
+  private lastCodexTokens: CodexTokenSnapshot | null = null;
+  private quotaFocus: QuotaProvider | null | undefined;
   private usageErrors: { claude: string | null; kimi: string | null; cost: string | null } = {
     claude: null,
     kimi: null,
@@ -129,13 +137,26 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
     this.broadcast({ type: 'agent_detail', detail });
   }
 
-  updateSubscription(data: unknown): void {
-    const provider =
-      data && typeof data === 'object' && typeof (data as { provider?: unknown }).provider === 'string'
-        ? ((data as { provider: string }).provider as 'claude' | 'kimi')
-        : 'claude';
+  updateSubscription(data: SubscriptionSnapshot): void {
+    const provider = data.provider ?? 'claude';
     this.lastSubscription[provider] = data;
-    this.usageErrors[provider] = null;
+    if (provider !== 'codex') this.usageErrors[provider] = null;
+    this.pushUsage();
+  }
+
+  updateQuotaFocus(focus: QuotaProvider | null | undefined): void {
+    if (this.quotaFocus === focus) return;
+    this.quotaFocus = focus;
+    this.pushUsage();
+  }
+
+  getDisplayedQuotaProvider(): QuotaProvider | null {
+    return visibleQuotaProvider(this.quotaFocus, this.lastSubscription, this.lastCost !== null);
+  }
+
+  clearCodexSubscription(): void {
+    if (!this.lastSubscription.codex) return;
+    this.lastSubscription.codex = null;
     this.pushUsage();
   }
 
@@ -148,6 +169,11 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
   /** Session / project token totals read from the transcripts. */
   updateTokens(data: unknown): void {
     this.lastTokens = data;
+    this.pushUsage();
+  }
+
+  updateCodexTokens(data: CodexTokenSnapshot | null): void {
+    this.lastCodexTokens = data;
     this.pushUsage();
   }
 
@@ -172,8 +198,15 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
   private pushUsage(): void {
     this.broadcast({
       type: 'usage_update',
-      data: { subscription: this.lastSubscription, cost: this.lastCost, tokens: this.lastTokens },
+      data: this.usageData(),
     });
+  }
+
+  private usageData() {
+    return {
+      subscription: this.lastSubscription, cost: this.lastCost,
+      tokens: this.lastTokens, codexTokens: this.lastCodexTokens, quotaProvider: this.getDisplayedQuotaProvider(),
+    };
   }
 
   isVisible(): boolean {
@@ -225,12 +258,14 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
     if (
       this.lastSubscription.claude !== null ||
       this.lastSubscription.kimi !== null ||
+      this.lastSubscription.codex !== null ||
       this.lastCost !== null ||
-      this.lastTokens !== null
+      this.lastTokens !== null ||
+      this.lastCodexTokens !== null
     ) {
       webview.postMessage({
         type: 'usage_update',
-        data: { subscription: this.lastSubscription, cost: this.lastCost, tokens: this.lastTokens },
+        data: this.usageData(),
       });
     }
     for (const source of ['claude', 'kimi', 'cost'] as const) {
@@ -274,7 +309,17 @@ export class OfficeDashboardProvider implements vscode.WebviewViewProvider {
     html = html.replace(/\{\{cspSource\}\}/g, webview.cspSource);
     html = html.replace(/\{\{nonce\}\}/g, nonce);
     // Resolved UI locale (e.g. "ru-RU") — the webview localizes its chrome from it.
-    html = html.replace(/\{\{lang\}\}/g, uiLocale());
+    const locale = uiLocale();
+    html = html.replace(/\{\{lang\}\}/g, locale);
+    const messagesFile = locale.toLowerCase().startsWith('ru') ? 'package.nls.ru.json' : 'package.nls.json';
+    let messages: Record<string, string> = {};
+    try {
+      messages = JSON.parse(fs.readFileSync(path.join(this.extensionUri.fsPath, messagesFile), 'utf8')) as Record<string, string>;
+    } catch {
+      // The webview falls back to its shared token labels.
+    }
+    html = html.replace(/\{\{(codexCostNote|codexCacheWrite|codexCacheRead|codexProjectTitle)\}\}/g,
+      (_, key: string) => (messages[key] ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'));
     html = html.replace(/\{\{version\}\}/g, this.version);
     html = html.replace(/\{\{footerMeta\}\}/g, this.footerMeta);
 

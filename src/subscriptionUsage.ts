@@ -45,7 +45,7 @@ export interface UsageLimitEntry {
 export interface SubscriptionSnapshot {
   fetchedAt: string;
   /** Which provider this snapshot belongs to (set by the watcher, not parsers). */
-  provider?: 'claude' | 'kimi';
+  provider?: 'claude' | 'kimi' | 'codex';
   /** Raw subscription type from credentials, e.g. "pro" / "max". */
   plan: string | null;
   limits: UsageLimitEntry[];
